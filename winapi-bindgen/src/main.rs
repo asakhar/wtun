@@ -4,7 +4,7 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-  let file = "swdevicedef";
+  let file = "swdevice";
     // Find the Windows SDK include directory
     let sdk_dir = match env::var("WINDOWSSDKDIR") {
         Ok(val) => PathBuf::from(val),
@@ -20,6 +20,7 @@ fn main() {
         .clang_arg("--target=x86_64-pc-windows-msvc") // Specify the target architecture
         .clang_arg("-D_AMD64_") // Specify the target architecture
         .clang_arg("-D_WIN32_WINNT=0x0500")
+        .clang_arg("-DNTDDI_VERSION=0x0A00000C")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .generate()
         .expect("Failed to generate bindings");

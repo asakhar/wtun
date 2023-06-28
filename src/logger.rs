@@ -10,18 +10,14 @@ use cutils::{
 use get_last_error::Win32Error;
 use winapi::{
   shared::{
-    minwindef::{DWORD, HKEY, LPVOID, ULONG},
-    ntdef::{NTSTATUS, NT_SUCCESS, PVOID, WCHAR},
-    winerror::{ERROR_INVALID_PARAMETER, ERROR_OUTOFMEMORY},
+    minwindef::{DWORD, HKEY, ULONG},
+    ntdef::{NTSTATUS, NT_SUCCESS, WCHAR},
   },
-  um::heapapi::{HeapAlloc, HeapFree, HeapReAlloc},
-  vc::vcruntime::size_t,
 };
 
 use crate::{
   ntdll::{NtQueryKey, KEY_NAME_INFORMATION},
   registry::{RegKey, MAX_REG_PATH},
-  wmain::ModuleHeap,
 };
 
 /**

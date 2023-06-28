@@ -25,14 +25,16 @@ use winapi::shared::minwindef::{FALSE, HKEY, ULONG};
 use winapi::shared::netioapi::{ConvertInterfaceAliasToLuid, ConvertInterfaceLuidToGuid};
 use winapi::shared::ntdef::{HANDLE, LPCWSTR, PCWSTR};
 use winapi::shared::winerror::{
-  ERROR_BUFFER_OVERFLOW, ERROR_DEVICE_NOT_AVAILABLE, ERROR_DUP_NAME, ERROR_GEN_FAILURE,
-  ERROR_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, FAILED, HRESULT, NO_ERROR, S_OK,
+  ERROR_BUFFER_OVERFLOW, ERROR_DEVICE_ENUMERATION_ERROR, ERROR_DEVICE_NOT_AVAILABLE,
+  ERROR_DUP_NAME, ERROR_GEN_FAILURE, ERROR_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, FAILED,
+  HRESULT, NO_ERROR, S_OK,
 };
 use winapi::um::cfgmgr32::{
   CM_Get_DevNode_Status, CM_Get_Device_IDW, CM_Get_Device_Interface_ListW,
-  CM_Get_Device_Interface_List_SizeW, CM_Locate_DevNodeW, CM_GET_DEVICE_INTERFACE_LIST_PRESENT,
-  CM_LOCATE_DEVNODE_NORMAL, CONFIGRET, CR_SUCCESS, DEVINST, DEVINSTID_W, MAX_DEVICE_ID_LEN,
-  MAX_GUID_STRING_LEN,
+  CM_Get_Device_Interface_List_SizeW, CM_Locate_DevNodeW, CM_Open_DevNode_Key,
+  RegDisposition_OpenAlways, CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CM_LOCATE_DEVINST_PHANTOM,
+  CM_LOCATE_DEVNODE_NORMAL, CM_REGISTRY_SOFTWARE, CONFIGRET, CR_SUCCESS, DEVINST, DEVINSTID_W,
+  MAX_DEVICE_ID_LEN, MAX_GUID_STRING_LEN,
 };
 use winapi::um::combaseapi::{CLSIDFromString, CoCreateGuid, StringFromGUID2};
 use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
@@ -42,17 +44,19 @@ use winapi::um::setupapi::{
   SetupDiCallClassInstaller, SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo,
   SetupDiGetClassDevsExW, SetupDiOpenDevRegKey, SetupDiSetClassInstallParamsW,
   SetupDiSetDevicePropertyW, DICS_DISABLE, DICS_ENABLE, DIF_PROPERTYCHANGE, DIF_REMOVE,
-  DI_REMOVEDEVICE_GLOBAL, SP_CLASSINSTALL_HEADER, SP_PROPCHANGE_PARAMS, SP_REMOVEDEVICE_PARAMS,
+  DI_REMOVEDEVICE_GLOBAL, ERROR_PNP_REGISTRY_ERROR, SP_CLASSINSTALL_HEADER, SP_PROPCHANGE_PARAMS,
+  SP_REMOVEDEVICE_PARAMS,
 };
 use winapi::um::setupapi::{SetupDiGetDevicePropertyW, DICS_FLAG_GLOBAL};
 use winapi::um::setupapi::{DIREG_DRV, HDEVINFO, SP_DEVINFO_DATA};
 use winapi::um::synchapi::{CreateEventW, SetEvent, WaitForSingleObject};
 use winapi::um::threadpoollegacyapiset::QueueUserWorkItem;
-use winapi::um::winbase::{WAIT_FAILED, WAIT_OBJECT_0};
+use winapi::um::winbase::{INFINITE, WAIT_FAILED, WAIT_OBJECT_0};
 use winapi::um::winnt::{
   FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE,
-  KEY_QUERY_VALUE, PVOID, WCHAR,
+  KEY_QUERY_VALUE, KEY_SET_VALUE, PVOID, REG_BINARY, WCHAR,
 };
+use winapi::um::winreg::RegSetValueExW;
 use winapi::DEFINE_GUID;
 
 use crate::driver::DriverInstall;
@@ -67,6 +71,11 @@ use crate::winapi_ext::devquery::{
   _DEV_QUERY_RESULT_ACTION_DevQueryResultUpdate, _DEV_QUERY_STATE_DevQueryStateAborted,
   DEVPROP_FILTER_EXPRESSION, DEV_QUERY_RESULT_ACTION_DATA, HDEVQUERY,
   _DEVPROP_OPERATOR_DEVPROP_OPERATOR_EQUALS, _DEVPROP_OPERATOR_DEVPROP_OPERATOR_EQUALS_IGNORE_CASE,
+};
+use crate::winapi_ext::swdevice::{
+  SwDeviceClose, SwDeviceCreate, _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesDriverRequired,
+  _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesSilentInstall, HSWDEVICE, PHSWDEVICE,
+  SW_DEVICE_CREATE_INFO,
 };
 use crate::winapi_ext::swdevicedef::{
   _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesDriverRequired,
@@ -91,8 +100,6 @@ pub(crate) const DEVPKEY_Wintun_Name: DEVPROPKEY = DEVPROPKEY {
 
 static OrphanThreadIsWorking: AtomicBool = AtomicBool::new(false);
 
-pub struct HSWDEVICE__;
-pub type HSWDEVICE = *mut HSWDEVICE__;
 pub struct WINTUN_ADAPTER {
   SwDevice: HSWDEVICE,
   DevInfo: HDEVINFO,
@@ -106,9 +113,9 @@ pub struct WINTUN_ADAPTER {
 }
 
 pub fn WintunCreateAdapter(
-  Name: &WideCStr,
-  TunnelType: &WideCStr,
-  RequestedGUID: Option<GUID>,
+  name: &WideCStr,
+  tunnel_type: &WideCStr,
+  requested_guid: Option<GUID>,
 ) -> Win32Result<WINTUN_ADAPTER> {
   let mut adapter = WINTUN_ADAPTER {
     InterfaceFilename: Default::default(),
@@ -118,37 +125,38 @@ pub fn WintunCreateAdapter(
   let dev_install_mutex = SystemNamedMutexLock::take_device_installation_mutex()?;
   let (mut dev_info_existing_adapters, mut existing_adapters) = DriverInstall()?;
   info!("Creating adapter");
-  let mut RootNode = unsafe { DEVINST::init_zeroed() };
-  let mut RootNodeName = [0 as WCHAR; 200 /* rasmans.dll uses 200 hard coded instead of calling CM_Get_Device_ID_Size. */];
+  let mut root_node = unsafe { DEVINST::init_zeroed() };
+  let mut root_node_name = [0 as WCHAR; 200 /* rasmans.dll uses 200 hard coded instead of calling CM_Get_Device_ID_Size. */];
+  let mut root_node_name = unsafe { WideCStr::from_mut_slice_unchecked(&mut root_node_name) };
   let result = unsafe {
     CM_Locate_DevNodeW(
-      RootNode.get_mut_ptr(),
+      root_node.get_mut_ptr(),
       std::ptr::null_mut(),
       CM_LOCATE_DEVNODE_NORMAL,
     )
   };
   if result != CR_SUCCESS {
     return Err(error!(
-      Win32Error::from_cr(result),
+      Win32Error::from_cr(result, ERROR_GEN_FAILURE),
       "Failed to get root node name"
     ));
   }
   let result = unsafe {
     CM_Get_Device_IDW(
-      RootNode,
-      RootNodeName.as_mut_ptr(),
-      RootNodeName.len() as u32,
+      root_node,
+      root_node_name.as_mut_ptr(),
+      root_node_name.len(),
       0,
     )
   };
   if result != CR_SUCCESS {
     return Err(error!(
-      Win32Error::from_cr(result),
+      Win32Error::from_cr(result, ERROR_GEN_FAILURE),
       "Failed to get root node name"
     ));
   }
   let mut result = S_OK;
-  let instance_id = RequestedGUID.unwrap_or_else(|| {
+  let instance_id = requested_guid.unwrap_or_else(|| {
     let mut guid = unsafe { GUID::init_zeroed() };
     result = unsafe { CoCreateGuid(guid.get_mut_ptr()) };
     guid
@@ -160,6 +168,7 @@ pub fn WintunCreateAdapter(
     ));
   }
   let mut instance_id_str = [0 as WCHAR; MAX_GUID_STRING_LEN];
+  let mut instance_id_str = unsafe { WideCStr::from_mut_slice_unchecked(&mut instance_id_str) };
   let result = unsafe {
     StringFromGUID2(
       instance_id.get_const_ptr(),
@@ -174,27 +183,150 @@ pub fn WintunCreateAdapter(
     ));
   }
 
-  let mut CreateContext = SW_DEVICE_CREATE_CTX::new(adapter.DevInstanceID.as_ref())?;
+  let mut create_context = SW_DEVICE_CREATE_CTX::new(adapter.DevInstanceID.as_ref())?;
   #[cfg(Win7)]
   {
-    if (!CreateAdapterWin7(Adapter, Name, TunnelTypeName)) {
+    if (!CreateAdapterWin7(Adapter, name, TunnelTypeName)) {
       LastError = GetLastError();
       // goto cleanupCreateContext;
     }
     // goto skipSwDevice;
   }
+  WintunCreateAdapterStub(
+    instance_id,
+    instance_id_str,
+    tunnel_type,
+    root_node_name,
+    &mut create_context,
+    &mut adapter,
+  )?;
+  let hwids = wide_array!("Wintun"; WINTUN_HWID.len_usize()+1);
+  let create_info = SW_DEVICE_CREATE_INFO {
+    cbSize: csizeof!(SW_DEVICE_CREATE_INFO),
+    pszInstanceId: instance_id_str.as_ptr(),
+    pszzHardwareIds: hwids.as_ptr(),
+    CapabilityFlags: (_SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesSilentInstall
+      | _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesDriverRequired) as _,
+    pszDeviceDescription: tunnel_type.as_ptr(),
+    ..unsafe { core::mem::zeroed() }
+  };
+  // --------------------
+  dev_install_mutex.release();
+  todo!()
+}
+fn WintunCreateAdapterStub(
+  instance_id: GUID,
+  instance_id_str: &WideCStr,
+  tunnel_type: &WideCStr,
+  root_node_name: &WideCStr,
+  create_context: &mut SW_DEVICE_CREATE_CTX,
+  adapter: &mut WINTUN_ADAPTER,
+) -> Win32Result<()> {
   let mut stub_create_info = SW_DEVICE_CREATE_INFO {
-    cbSize: csizeof!(SW_DEVICE_CREATE_INFO) as u32,
+    cbSize: csizeof!(SW_DEVICE_CREATE_INFO),
     pszInstanceId: instance_id_str.as_ptr(),
     pszzHardwareIds: widecstr!("").as_ptr(),
     CapabilityFlags: (_SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesSilentInstall
       | _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesDriverRequired) as u32,
-    pszDeviceDescription: TunnelType.as_ptr(),
+    pszDeviceDescription: tunnel_type.as_ptr(),
     ..unsafe { std::mem::zeroed() }
   };
+  let mut stub_device_properties = [DEVPROPERTY {
+    CompKey: DEVPROPCOMPKEY {
+      Key: DEVPKEY_DeviceInterface_ClassGuid,
+      Store: DEVPROP_STORE_SYSTEM,
+      ..unsafe { core::mem::zeroed() }
+    },
+    Type: DEVPROP_TYPE_GUID,
+    Buffer: GUID_DEVCLASS_NET.get_pvoid(),
+    BufferSize: csizeof!(GUID_DEVCLASS_NET),
+  }];
 
-  dev_install_mutex.release();
-  todo!()
+  let hret = unsafe {
+    SwDeviceCreate(
+      WINTUN_HWID.as_ptr(),
+      root_node_name.as_ptr(),
+      stub_create_info.get_const_ptr(),
+      stub_device_properties.len() as u32,
+      stub_device_properties.as_ptr(),
+      Some(DeviceCreateCallback),
+      create_context.get_pvoid(),
+      adapter.SwDevice.get_mut_ptr(),
+    )
+  };
+  if FAILED(hret) {
+    return Err(error!(
+      Win32Error::new(hret as u32),
+      "Failed to initiate stub device creation"
+    ));
+  }
+  let res = unsafe { WaitForSingleObject(create_context.Triggered, INFINITE) };
+  if res != WAIT_OBJECT_0 {
+    return Err(last_error!(
+      "Failed to wait for stub device creation trigger"
+    ));
+  }
+  if FAILED(create_context.CreateResult) {
+    return Err(error!(
+      Win32Error::new(create_context.CreateResult as u32),
+      "Failed to create stub device"
+    ));
+  }
+  let mut dev_inst = unsafe { DEVINST::init_zeroed() };
+  let cret = unsafe {
+    CM_Locate_DevNodeW(
+      dev_inst.get_mut_ptr(),
+      adapter.DevInstanceID.as_mut_ptr(),
+      CM_LOCATE_DEVINST_PHANTOM,
+    )
+  };
+  if cret != CR_SUCCESS {
+    return Err(error!(
+      Win32Error::from_cr(cret, ERROR_DEVICE_ENUMERATION_ERROR),
+      "Failed to make stub device list"
+    ));
+  }
+  let mut driver_key = unsafe { HKEY::init_zeroed() };
+  let cret = unsafe {
+    CM_Open_DevNode_Key(
+      dev_inst,
+      KEY_SET_VALUE,
+      0,
+      RegDisposition_OpenAlways,
+      driver_key.get_mut_ptr(),
+      CM_REGISTRY_SOFTWARE,
+    )
+  };
+  let driver_key = RegKey::from_raw(driver_key);
+  if cret != CR_SUCCESS {
+    return Err(error!(
+      Win32Error::from_cr(cret, ERROR_PNP_REGISTRY_ERROR),
+      "Failed to create software registry key"
+    ));
+  }
+  let res = unsafe {
+    RegSetValueExW(
+      driver_key.as_raw(),
+      widecstr!("SuggestedInstanceId").as_ptr(),
+      0,
+      REG_BINARY,
+      instance_id.get_const_ptr() as *const _,
+      csizeof!(=instance_id),
+    )
+  } as u32;
+  driver_key.close();
+  if res != ERROR_SUCCESS {
+    return Err(error!(
+      Win32Error::new(res),
+      "Failed to set SuggestedInstanceId to {}",
+      instance_id_str.display()
+    ));
+  }
+  unsafe {
+    SwDeviceClose(adapter.SwDevice);
+  }
+  adapter.SwDevice = std::ptr::null_mut();
+  Ok(())
 }
 pub fn WintunOpenAdapter(Name: &WideCStr) -> Win32Result<WINTUN_ADAPTER> {
   // let mut Adapter: *mut WINTUN_ADAPTER = std::ptr::null_mut();
@@ -835,9 +967,4 @@ pub fn NciSetAdapterName(Guid: GUID, Name: &WideCStr) -> Win32Result<WideCString
     todo!("Trying another name is not implemented")
   }
   Err(Win32Error::new(ERROR_DUP_NAME))
-}
-
-extern "C" {
-  fn SwDeviceClose(hSwDevice: HSWDEVICE);
-  // fn CM_MapCrToWin32Err(CmReturnCode: CONFIGRET, DefaultErr: DWORD) -> DWORD;
 }
