@@ -3,15 +3,15 @@ use std::{
   path::{Path, PathBuf},
 };
 
+use cutils::{Win32Result, strings::WideCStr};
 use get_last_error::Win32Error;
 use rand::Rng;
-use widestring::WideCStr;
 use winapi::{
   shared::{minwindef::MAX_PATH, ntdef::WCHAR},
   um::sysinfoapi::GetWindowsDirectoryW,
 };
 
-use crate::{last_error, utils::Win32Result};
+use crate::logger::last_error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResId {
@@ -51,7 +51,7 @@ pub fn create_temp_dir() -> Win32Result<PathBuf> {
     let err = last_error!("Failed to get Windows folder");
     return Err(err.into());
   }
-  let windows_dir = unsafe { WideCStr::from_ptr_str(windows_directory.as_ptr()) };
+  let windows_dir = unsafe { WideCStr::from_ptr(windows_directory.as_ptr()) };
   let windows_dir = windows_dir.to_os_string();
   let windows_dir_path = Path::new(&windows_dir);
   let temp_path = windows_dir_path.join("Temp");

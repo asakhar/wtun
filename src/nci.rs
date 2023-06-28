@@ -1,7 +1,5 @@
-use widestring::WideCStr;
+use cutils::{strings::WideCStr, Win32Result, inspection::GetPtrExt, code_to_result};
 use winapi::shared::{guiddef::GUID, ntdef::LPCWSTR, minwindef::DWORD};
-
-use crate::{utils::{Win32Result, GetPtrExt, code_to_result}};
 
 extern "C" {
   fn NciSetConnectionName(Guid: *const GUID, NewName: LPCWSTR) -> DWORD;

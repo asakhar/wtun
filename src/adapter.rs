@@ -1,9 +1,13 @@
 use std::sync::atomic::AtomicBool;
 
-use cutils::Win32Result;
-use cutils::inspection::{InitZeroed, GetPtrExt};
+use cutils::ignore::ResultIgnoreExt;
+use cutils::inspection::{CastToMutVoidPtrExt, GetPtrExt, InitZeroed};
+use cutils::strings::{WideCStr, WideCString};
+use cutils::{
+  check_handle, csizeof, defer, guid_eq, unsafe_defer, wide_array, widecstr, GetPvoidExt,
+  Win32ErrorFromCrExt, Win32ErrorToResultExt, Win32Result,
+};
 use get_last_error::Win32Error;
-use widestring::{widecstr, widestr, WideCStr, WideCString, WideStr};
 use winapi::shared::cfg::DN_HAS_PROBLEM;
 use winapi::shared::devguid::GUID_DEVCLASS_NET;
 use winapi::shared::devpkey::{
@@ -43,6 +47,7 @@ use winapi::um::setupapi::{
 use winapi::um::setupapi::{SetupDiGetDevicePropertyW, DICS_FLAG_GLOBAL};
 use winapi::um::setupapi::{DIREG_DRV, HDEVINFO, SP_DEVINFO_DATA};
 use winapi::um::synchapi::{CreateEventW, SetEvent, WaitForSingleObject};
+use winapi::um::threadpoollegacyapiset::QueueUserWorkItem;
 use winapi::um::winbase::{WAIT_FAILED, WAIT_OBJECT_0};
 use winapi::um::winnt::{
   FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE,
@@ -52,6 +57,7 @@ use winapi::DEFINE_GUID;
 
 use crate::driver::DriverInstall;
 use crate::logger::LoggerGetRegistryKeyPath;
+use crate::logger::{error, info, last_error, log, warn};
 use crate::namespace::SystemNamedMutexLock;
 use crate::nci::SetConnectionName;
 use crate::registry::{RegKey, RegistryQueryDWORD, RegistryQueryString};
@@ -70,26 +76,10 @@ use crate::wmain::{NativeMachine, IMAGE_FILE_PROCESS};
 // use crate::winapi_ext::devquery::{HDEVQUERY, _DEV_QUERY_RESULT_ACTION_DevQueryResultAdd, _DEV_QUERY_RESULT_ACTION_DevQueryResultUpdate, DEVPROP_FILTER_EXPRESSION, _DEVPROP_OPERATOR_DEVPROP_OPERATOR_EQUALS_IGNORE_CASE};
 // use crate::winapi_ext::devquerydef::{DEV_QUERY_RESULT_ACTION_DATA, _DEV_QUERY_STATE_DevQueryStateAborted};
 
-#[macro_export]
-macro_rules! WINTUN_HWID_NATIVE {
-  () => {
-    "Wintun"
-  };
-}
-#[macro_export]
-macro_rules! WINTUN_HWID {
-  () => {
-    widestring::u16cstr!($crate::WINTUN_HWID_NATIVE!())
-  };
-}
-#[macro_export]
-macro_rules! WINTUN_ENUMERATOR {
-  () => {
-    widestring::u16cstr!(concat!("ROOT\\", $crate::WINTUN_HWID_NATIVE!()))
-  };
-}
+pub(crate) const WINTUN_HWID: &WideCStr = widecstr!("Wintun");
+pub(crate) const WINTUN_ENUMERATOR: &WideCStr = widecstr!(r"ROOT\Wintun");
 
-pub const DEVPKEY_Wintun_Name: DEVPROPKEY = DEVPROPKEY {
+pub(crate) const DEVPKEY_Wintun_Name: DEVPROPKEY = DEVPROPKEY {
   fmtid: DEVPROPGUID {
     Data1: 0x3361c968,
     Data2: 0x2f2e,
@@ -122,6 +112,7 @@ pub fn WintunCreateAdapter(
 ) -> Win32Result<WINTUN_ADAPTER> {
   let mut adapter = WINTUN_ADAPTER {
     InterfaceFilename: Default::default(),
+    DevInstanceID: Default::default(),
     ..unsafe { InitZeroed::init_zeroed() }
   };
   let dev_install_mutex = SystemNamedMutexLock::take_device_installation_mutex()?;
@@ -168,7 +159,7 @@ pub fn WintunCreateAdapter(
       "Failed to convert GUID"
     ));
   }
-  let instance_id_str = [0 as WCHAR; MAX_GUID_STRING_LEN];
+  let mut instance_id_str = [0 as WCHAR; MAX_GUID_STRING_LEN];
   let result = unsafe {
     StringFromGUID2(
       instance_id.get_const_ptr(),
@@ -183,7 +174,7 @@ pub fn WintunCreateAdapter(
     ));
   }
 
-  let mut CreateContext = SW_DEVICE_CREATE_CTX::new(&adapter.DevInstanceID)?;
+  let mut CreateContext = SW_DEVICE_CREATE_CTX::new(adapter.DevInstanceID.as_ref())?;
   #[cfg(Win7)]
   {
     if (!CreateAdapterWin7(Adapter, Name, TunnelTypeName)) {
@@ -193,7 +184,7 @@ pub fn WintunCreateAdapter(
     // goto skipSwDevice;
   }
   let mut stub_create_info = SW_DEVICE_CREATE_INFO {
-    cbSize: csizeof!(SW_DEVICE_CREATE_INFO),
+    cbSize: csizeof!(SW_DEVICE_CREATE_INFO) as u32,
     pszInstanceId: instance_id_str.as_ptr(),
     pszzHardwareIds: widecstr!("").as_ptr(),
     CapabilityFlags: (_SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesSilentInstall
@@ -203,10 +194,12 @@ pub fn WintunCreateAdapter(
   };
 
   dev_install_mutex.release();
+  todo!()
 }
 pub fn WintunOpenAdapter(Name: &WideCStr) -> Win32Result<WINTUN_ADAPTER> {
   // let mut Adapter: *mut WINTUN_ADAPTER = std::ptr::null_mut();
   // Adapter as *mut _
+  todo!()
 }
 pub fn WintunCloseAdapter(Adapter: &mut WINTUN_ADAPTER) {
   if !Adapter.SwDevice.is_null() {
@@ -218,7 +211,7 @@ pub fn WintunCloseAdapter(Adapter: &mut WINTUN_ADAPTER) {
     }
     unsafe { SetupDiDestroyDeviceInfoList(Adapter.DevInfo) };
   }
-  Free(Adapter.get_mut_ptr().cast_to_pvoid());
+  // Free(Adapter.get_mut_ptr().cast_to_pvoid());
   QueueUpOrphanedDeviceCleanupRoutine();
 }
 
@@ -266,7 +259,7 @@ DEFINE_GUID!(
 );
 
 pub(crate) fn AdapterGetDeviceObjectFileName(InstanceId: &WideCStr) -> Win32Result<WideCString> {
-  let interface_len = 0;
+  let mut interface_len = 0;
   let cr = unsafe {
     CM_Get_Device_Interface_List_SizeW(
       interface_len.get_mut_ptr(),
@@ -275,17 +268,15 @@ pub(crate) fn AdapterGetDeviceObjectFileName(InstanceId: &WideCStr) -> Win32Resu
       CM_GET_DEVICE_INTERFACE_LIST_PRESENT,
     )
   };
-  let last_error = unsafe { CM_MapCrToWin32Err(cr, ERROR_GEN_FAILURE) };
-  if last_error != ERROR_SUCCESS {
+  if let Err(err) = Win32Error::from_cr(cr).to_result() {
     let err = error!(
-      Win32Error::new(last_error),
+      err,
       "Failed to query adapter {} associated instances size",
       InstanceId.display()
     );
-    set_last_error(err);
     return Err(err);
   }
-  let interfaces = vec![0 as WCHAR; interface_len as usize];
+  let mut interfaces = vec![0 as WCHAR; interface_len as usize];
   let cr = unsafe {
     CM_Get_Device_Interface_ListW(
       GUID_DEVINTERFACE_NET.get_mut_ptr(),
@@ -295,19 +286,17 @@ pub(crate) fn AdapterGetDeviceObjectFileName(InstanceId: &WideCStr) -> Win32Resu
       CM_GET_DEVICE_INTERFACE_LIST_PRESENT,
     )
   };
-  let last_error = unsafe { CM_MapCrToWin32Err(cr, ERROR_GEN_FAILURE) };
-  if last_error != ERROR_SUCCESS {
+  if let Err(err) = Win32Error::from_cr(cr).to_result() {
     let err = error!(
-      Win32Error::new(last_error),
+      err,
       "Failed to get adapter {} associated instances",
       InstanceId.display()
     );
-    set_last_error(err);
     return Err(err);
   }
-  WideCString::from_vec(interfaces)
-    .ok()
-    .ok_or(Win32Error::new(ERROR_DEVICE_NOT_AVAILABLE))
+  Ok(WideCString::from(interfaces))
+  // .ok()
+  // .ok_or(Win32Error::new(ERROR_DEVICE_NOT_AVAILABLE))
 }
 
 #[repr(C)]
@@ -424,7 +413,9 @@ pub(crate) fn WaitForInterface(InstanceId: &WideCStr) -> Win32Result<()> {
       "Failed to create device query"
     ));
   }
-  let cleanupQuery = Defered::new(|| unsafe { DevCloseObjectQuery(Query) });
+  defer! { cleanupQuery <-
+    unsafe { DevCloseObjectQuery(Query) }
+  };
   let result = unsafe { WaitForSingleObject(Ctx.Event, 15000) };
   if result != WAIT_OBJECT_0 {
     if result == WAIT_FAILED {
@@ -446,13 +437,13 @@ pub(crate) fn WaitForInterface(InstanceId: &WideCStr) -> Win32Result<()> {
 }
 
 #[repr(C)]
-pub(crate) struct SW_DEVICE_CREATE_CTX<'a> {
+pub(crate) struct SW_DEVICE_CREATE_CTX {
   CreateResult: HRESULT,
-  DeviceInstanceId: Option<&'a WideCStr>,
+  DeviceInstanceId: Option<WideCString>,
   Triggered: HANDLE,
 }
 
-impl<'a> SW_DEVICE_CREATE_CTX<'a> {
+impl SW_DEVICE_CREATE_CTX {
   pub fn new(id: &WideCStr) -> Win32Result<Self> {
     let Triggered = unsafe { CreateEventW(std::ptr::null_mut(), FALSE, FALSE, std::ptr::null()) };
     if !check_handle(Triggered) {
@@ -460,13 +451,13 @@ impl<'a> SW_DEVICE_CREATE_CTX<'a> {
     }
     Ok(Self {
       CreateResult: 0,
-      DeviceInstanceId: Some(id),
+      DeviceInstanceId: Some(id.into()),
       Triggered,
     })
   }
 }
 
-impl<'a> Drop for SW_DEVICE_CREATE_CTX<'a> {
+impl Drop for SW_DEVICE_CREATE_CTX {
   fn drop(&mut self) {
     unsafe { CloseHandle(self.Triggered) };
   }
@@ -525,7 +516,7 @@ pub(crate) fn AdapterEnableInstance(
   DevInfo: HDEVINFO,
   DevInfoData: *mut SP_DEVINFO_DATA,
 ) -> Win32Result<()> {
-  if NativeMachive != IMAGE_FILE_PROCESS {
+  if unsafe { NativeMachine } != IMAGE_FILE_PROCESS {
     return EnableInstanceViaRundll32(DevInfo, DevInfoData);
   }
   let Params = SP_PROPCHANGE_PARAMS {
@@ -559,7 +550,7 @@ pub(crate) fn AdapterDisableInstance(
   DevInfo: HDEVINFO,
   DevInfoData: *mut SP_DEVINFO_DATA,
 ) -> Win32Result<()> {
-  if NativeMachive != IMAGE_FILE_PROCESS {
+  if unsafe { NativeMachine } != IMAGE_FILE_PROCESS {
     return EnableInstanceViaRundll32(DevInfo, DevInfoData);
   }
   let Params = SP_PROPCHANGE_PARAMS {
@@ -613,12 +604,12 @@ fn PopulateAdapterData(Adapter: &mut WINTUN_ADAPTER) -> Win32Result<()> {
   }
   Adapter.LuidIndex = RegistryQueryDWORD(&Key, widecstr!("NetLuidIndex"), true)?;
   Adapter.IfType = RegistryQueryDWORD(&Key, widecstr!("*IfType"), true)?;
-  Adapter.InterfaceFilename = AdapterGetDeviceObjectFileName(Adapter.DevInstanceID)?;
+  Adapter.InterfaceFilename = AdapterGetDeviceObjectFileName(Adapter.DevInstanceID.as_ref())?;
 
   Ok(())
 }
 
-fn DoOrphanedDeviceCleanup(Ctx: LPVOID) -> DWORD {
+unsafe extern "system" fn DoOrphanedDeviceCleanup(Ctx: LPVOID) -> DWORD {
   AdapterCleanupOrphanedDevices();
   OrphanThreadIsWorking.store(false, std::sync::atomic::Ordering::Relaxed);
   return 0;
@@ -635,7 +626,7 @@ fn QueueUpOrphanedDeviceCleanupRoutine() {
     .ignore()
     == false
   {
-    QueueUserWorkItem(DoOrphanedDeviceCleanup, std::ptr::null_mut(), 0);
+    unsafe { QueueUserWorkItem(Some(DoOrphanedDeviceCleanup), std::ptr::null_mut(), 0) };
   }
 }
 
@@ -657,7 +648,7 @@ pub fn AdapterCleanupOrphanedDevices() {
   let DevInfo = unsafe {
     SetupDiGetClassDevsExW(
       &GUID_DEVCLASS_NET,
-      WINTUN_ENUMERATOR!().as_ptr(),
+      WINTUN_ENUMERATOR.as_ptr(),
       std::ptr::null_mut(),
       0,
       std::ptr::null_mut(),
@@ -669,9 +660,9 @@ pub fn AdapterCleanupOrphanedDevices() {
     last_error!("Failed to get adapters");
     return;
   }
-  let destroyDeviceInfoList = Defered::new(|| unsafe {
+  unsafe_defer! { destroyDeviceInfoList <-
     SetupDiDestroyDeviceInfoList(DevInfo);
-  });
+  };
   let mut DevInfoData = unsafe {
     SP_DEVINFO_DATA {
       cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as DWORD,
@@ -700,7 +691,7 @@ pub fn AdapterCleanupOrphanedDevices() {
       continue;
     }
     let mut PropType = unsafe { DEVPROPTYPE::init_zeroed() };
-    let mut Name = wide_array![b"<unknown>"; MAX_ADAPTER_NAME];
+    let mut Name = wide_array!["<unknown>"; MAX_ADAPTER_NAME];
     const SIZE_OF_NAME: u32 = (std::mem::size_of::<WCHAR>() * MAX_ADAPTER_NAME) as u32;
     let NamePtr = Name.as_mut_ptr() as *mut u8;
     unsafe {
@@ -716,7 +707,7 @@ pub fn AdapterCleanupOrphanedDevices() {
       )
     };
     let result = AdapterRemoveInstance(DevInfo, DevInfoData.get_mut_ptr());
-    let Name = WideStr::from_slice(&Name);
+    let Name: &WideCStr = unsafe { Name.as_ref().try_into() }.unwrap_or(widecstr!("<unknown>"));
     if result.is_err() {
       last_error!("Failed to remove orphaned adapter \"{}\"", Name.display());
       continue;
@@ -735,7 +726,7 @@ fn RenameByNetGUID(Guid: GUID, Name: &WideCStr) -> Win32Result<()> {
   let DevInfo = unsafe {
     SetupDiGetClassDevsExW(
       GUID_DEVCLASS_NET.get_const_ptr(),
-      WINTUN_ENUMERATOR!().as_ptr(),
+      WINTUN_ENUMERATOR.as_ptr(),
       std::ptr::null_mut(),
       0,
       std::ptr::null_mut(),
@@ -746,9 +737,9 @@ fn RenameByNetGUID(Guid: GUID, Name: &WideCStr) -> Win32Result<()> {
   if DevInfo == INVALID_HANDLE_VALUE {
     return Win32Error::get_last_error().to_result();
   }
-  let destroyDevInfoList = Defered::new(|| {
-    unsafe { SetupDiDestroyDeviceInfoList(DevInfo) };
-  });
+  unsafe_defer! { destroyDevInfoList <-
+    SetupDiDestroyDeviceInfoList(DevInfo) ;
+  };
   let DevInfoData = SP_DEVINFO_DATA {
     cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as DWORD,
     ..unsafe { InitZeroed::init_zeroed() }
@@ -781,7 +772,7 @@ fn RenameByNetGUID(Guid: GUID, Name: &WideCStr) -> Win32Result<()> {
     if FAILED(HRet) || guid_eq(Guid, Guid2) {
       continue;
     }
-    let NameSize = ((Name.len() + 1) * std::mem::size_of::<WCHAR>()) as u32;
+    let NameSize = (Name.len() + 1) * std::mem::size_of::<WCHAR>() as u32;
     let result = unsafe {
       SetupDiSetDevicePropertyW(
         DevInfo,
@@ -799,16 +790,18 @@ fn RenameByNetGUID(Guid: GUID, Name: &WideCStr) -> Win32Result<()> {
     return Ok(());
   }
   destroyDevInfoList.run();
-  set_last_error(Win32Error::new(ERROR_NOT_FOUND));
-  Err(last_error!("Failed to get device by GUID: {:?}", Guid))
+  Err(error!(
+    Win32Error::new(ERROR_NOT_FOUND),
+    "Failed to get device by GUID: {:?}", Guid
+  ))
 }
 
 pub fn ConvertInterfaceAliasToGuid(Name: &WideCStr) -> Win32Result<GUID> {
   let mut Luid = unsafe { NET_LUID::init_zeroed() };
   let result = unsafe { ConvertInterfaceAliasToLuid(Name.as_ptr(), Luid.get_mut_ptr()) };
   if result != NO_ERROR {
-    set_last_error(Win32Error::new(result));
-    return Err(last_error!(
+    return Err(error!(
+      Win32Error::new(result),
       "Failed convert interface {} name to the locally unique identifier",
       Name.display()
     ));
@@ -816,8 +809,8 @@ pub fn ConvertInterfaceAliasToGuid(Name: &WideCStr) -> Win32Result<GUID> {
   let mut Guid = unsafe { GUID::init_zeroed() };
   let result = unsafe { ConvertInterfaceLuidToGuid(Luid.get_const_ptr(), Guid.get_mut_ptr()) };
   if result != NO_ERROR {
-    set_last_error(Win32Error::new(result));
-    return Err(last_error!(
+    return Err(error!(
+      Win32Error::new(result),
       "Failed to convert interface {} LUID ({}) to GUID",
       Name.display(),
       Luid.Value
@@ -828,14 +821,13 @@ pub fn ConvertInterfaceAliasToGuid(Name: &WideCStr) -> Win32Result<GUID> {
 
 pub fn NciSetAdapterName(Guid: GUID, Name: &WideCStr) -> Win32Result<WideCString> {
   const MAX_SUFFIX: u32 = 1000;
-  if Name.len() >= MAX_ADAPTER_NAME {
+  if Name.len_usize() >= MAX_ADAPTER_NAME {
     let err = Win32Error::new(ERROR_BUFFER_OVERFLOW);
-    set_last_error(err);
     return Err(err);
   }
   let mut avaliable_name = Name.to_owned();
   for i in 0..MAX_SUFFIX {
-    match SetConnectionName(Guid, &avaliable_name) {
+    match SetConnectionName(Guid, avaliable_name.as_ref()) {
       Ok(()) => return Ok(avaliable_name),
       Err(err) if err.code() == ERROR_DUP_NAME => {}
       Err(err) => return Err(err),

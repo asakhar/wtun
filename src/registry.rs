@@ -1,5 +1,10 @@
+use cutils::{
+  check_handle,
+  inspection::{CastToMutVoidPtrExt, GetPtrExt},
+  strings::{WideCStr, WideCString},
+  Win32Result,
+};
 use get_last_error::Win32Error;
-use widestring::{U16CString, WideCStr, WideCString};
 use winapi::{
   shared::{
     minwindef::{BYTE, DWORD, HKEY},
@@ -7,7 +12,6 @@ use winapi::{
     winerror::{ERROR_INVALID_DATA, ERROR_INVALID_DATATYPE, ERROR_MORE_DATA, ERROR_SUCCESS},
   },
   um::{
-    handleapi::INVALID_HANDLE_VALUE,
     processenv::ExpandEnvironmentStringsW,
     setupapi::{SetupDiOpenDevRegKey, HDEVINFO, PSP_DEVINFO_DATA},
     winnt::{REG_DWORD, REG_EXPAND_SZ, REG_MULTI_SZ, REG_SZ},
@@ -15,11 +19,7 @@ use winapi::{
   },
 };
 
-use crate::{
-  last_error,
-  logger::LoggerGetRegistryKeyPath,
-  utils::{set_last_error, GetPtrExt, Win32ErrorToResultExt, Win32Result},
-};
+use crate::logger::{error, last_error, LoggerGetRegistryKeyPath};
 
 /* Maximum registry path length
 https://support.microsoft.com/en-us/help/256986/windows-registry-information-for-advanced-users */
@@ -65,7 +65,7 @@ impl RegKey {
         samDesired,
       )
     };
-    if [INVALID_HANDLE_VALUE as HKEY, std::ptr::null_mut()].contains(&Key) {
+    if !check_handle(Key.cast_to_pvoid()) {
       return Err(last_error!("Failed to open device registry key"));
     }
     Ok(Self(Key))
@@ -110,21 +110,8 @@ pub fn RegistryGetString(
   if value.len() & 1 != 0 {
     return Err(Win32Error::new(ERROR_INVALID_DATA));
   }
-  let (pref, _, suff): (_, &[WCHAR], _) = unsafe { value.align_to() };
-  if !pref.is_empty() || !suff.is_empty() {
-    return Err(Win32Error::new(ERROR_INVALID_DATA));
-  }
-  let value_len = value.len();
-  let value_ptr = Box::<[u8]>::into_raw(value);
-  let value_ptr = value_ptr as *mut WCHAR;
-  let value_len = value_len / std::mem::size_of::<WCHAR>();
-  let value = std::ptr::slice_from_raw_parts_mut(value_ptr, value_len);
-  let mut value = unsafe { Box::from_raw(value) }.into_vec();
-  let count = value.iter().take_while(|item| **item != 0).count();
-  value.resize(count, 0);
-  let value = WideCString::from_vec(value)
-    .ok()
-    .ok_or(Win32Error::new(ERROR_INVALID_DATA))?;
+  let value: Vec<u16> = value.chunks_exact(2).map(|chunk| u16::from_ne_bytes(chunk.try_into().unwrap())).collect();
+  let value = WideCString::from(value);
 
   if value_type != RegistryValueType::RegExpandSz {
     return Ok(value);
@@ -135,7 +122,7 @@ pub fn RegistryGetString(
   let mut expanded = value.clone();
   loop {
     let Result = unsafe {
-      ExpandEnvironmentStringsW(value.as_ptr(), expanded.as_mut_ptr(), expanded.len() as u32)
+      ExpandEnvironmentStringsW(value.as_ptr(), expanded.as_mut_ptr(), expanded.capacity())
     };
     if Result == 0 {
       let printable = value.display();
@@ -144,11 +131,9 @@ pub fn RegistryGetString(
         printable
       ));
     }
-    if Result as usize > value.len() {
-      let amount = Result as usize - value.len();
-      let mut expanded_vec = expanded.into_vec();
-      expanded_vec.extend(std::iter::repeat(' ' as WCHAR).take(amount));
-      expanded = U16CString::from_vec(expanded_vec).unwrap();
+    if Result as usize > value.len_hint_usize() {
+      let amount = Result - value.len();
+      expanded.reserve(amount);
       continue;
     }
     return Ok(expanded);
@@ -189,10 +174,11 @@ pub fn RegistryQueryString(
     }
     _ => {
       let RegPath = LoggerGetRegistryKeyPath(Key);
-      set_last_error(Win32Error::new(ERROR_INVALID_DATATYPE));
-      return Err(last_error!(
+      let err = Win32Error::new(ERROR_INVALID_DATATYPE);
+      return Err(error!(
+        err,
         "Registry value {}\\{} is not a string (type: {})",
-        RegPath.display(),
+        RegPath.as_ref().display(),
         Name.display(),
         ValueType
       ));
@@ -237,34 +223,34 @@ pub fn RegistryQueryDWORD(
     )
   };
   if LastError != ERROR_SUCCESS as i32 {
-    set_last_error(Win32Error::new(LastError as u32));
+    let err = Win32Error::new(LastError as u32);
     if Log {
       let RegPath = LoggerGetRegistryKeyPath(Key);
-      return Err(last_error!(
+      return Err(error!(
+        err,
         "Failed to query registry value {}\\{}",
-        RegPath.display(),
+        RegPath.as_ref().display(),
         Name.display()
       ));
     }
-    Win32Error::get_last_error().to_result()?;
-    unreachable!();
+    return Err(err);
   }
   if ValueType != REG_DWORD {
     let RegPath = LoggerGetRegistryKeyPath(Key);
-    set_last_error(Win32Error::new(ERROR_INVALID_DATA));
-    return Err(last_error!(
+    return Err(error!(
+      Win32Error::new(ERROR_INVALID_DATA),
       "Value {}\\{} is not a DWORD (type: {})",
-      RegPath.display(),
+      RegPath.as_ref().display(),
       Name.display(),
       ValueType
     ));
   }
   if Size != std::mem::size_of::<DWORD>() {
     let RegPath = LoggerGetRegistryKeyPath(Key);
-    set_last_error(Win32Error::new(ERROR_INVALID_DATA));
-    return Err(last_error!(
+    return Err(error!(
+      Win32Error::new(ERROR_INVALID_DATA),
       "Value {}\\{} size is not 4 bytes (size: {})",
-      RegPath.display(),
+      RegPath.as_ref().display(),
       Name.display(),
       Size
     ));
@@ -298,17 +284,17 @@ fn RegistryQuery(
       return Ok(p.into_boxed_slice());
     }
     if LastError as u32 != ERROR_MORE_DATA {
-      set_last_error(Win32Error::new(LastError as u32));
+      let err = Win32Error::new(LastError as u32);
       if Log {
         let RegPath = LoggerGetRegistryKeyPath(Key);
-        return Err(last_error!(
+        return Err(error!(
+          err,
           "Failed to query registry value {}\\{}",
-          RegPath.display(),
+          RegPath.as_ref().display(),
           Name.display()
         ));
       }
-      Win32Error::get_last_error().to_result()?;
-      unreachable!();
+      return Err(err);
     }
     p.extend(std::iter::repeat(' ' as u8).take((BufLen - OldBufLen) as usize));
   }

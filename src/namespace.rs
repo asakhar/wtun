@@ -1,13 +1,13 @@
 use std::cell::UnsafeCell;
 
+use cutils::{unsafe_defer, inspection::GetPtrExt, strings::WideCStr, widecstr, Win32Result};
 use get_last_error::Win32Error;
 use lazy_static::lazy_static;
-use widestring::{widecstr, WideCStr};
 use winapi::{
   shared::{
     minwindef::{BYTE, DWORD, FALSE},
     ntdef::HANDLE,
-    winerror::{ERROR_ALREADY_EXISTS, ERROR_GEN_FAILURE, ERROR_PATH_NOT_FOUND},
+    winerror::{ERROR_ALREADY_EXISTS, ERROR_PATH_NOT_FOUND},
   },
   um::{
     handleapi::CloseHandle,
@@ -28,8 +28,7 @@ use winapi::{
 };
 
 use crate::{
-  error, last_error,
-  utils::{set_last_error, Defered, GetPtrExt, Win32Result},
+  logger::{last_error, error},
   wmain::{IsLocalSystem, SecurityAttributes},
 };
 
@@ -37,10 +36,10 @@ pub struct SystemNamedMutexLock(HANDLE);
 
 impl SystemNamedMutexLock {
   pub fn take_driver_installation_mutex() -> Win32Result<Self> {
-    Self::take(widecstr!("Wintun\\Wintun-Driver-Installation-Mutex"))
+    Self::take(widecstr!(r"Wintun\Wintun-Driver-Installation-Mutex"))
   }
   pub fn take_device_installation_mutex() -> Win32Result<Self> {
-    Self::take(widecstr!("Wintun\\Wintun-Device-Installation-Mutex"))
+    Self::take(widecstr!(r"Wintun\Wintun-Device-Installation-Mutex"))
   }
   pub fn take(name: impl AsRef<WideCStr>) -> Win32Result<Self> {
     NamespaceRuntimeInit()?;
@@ -52,7 +51,6 @@ impl SystemNamedMutexLock {
     let result = unsafe { WaitForSingleObject(Mutex, INFINITE) };
     if !matches!(result, WAIT_OBJECT_0 | WAIT_ABANDONED) {
       unsafe { CloseHandle(Mutex) };
-      set_last_error(Win32Error::new(ERROR_GEN_FAILURE));
       return Err(last_error!("Failed to get mutex (status: 0x{:x})", result));
     }
     Ok(SystemNamedMutexLock(Mutex))
@@ -160,9 +158,9 @@ fn NamespaceRuntimeInit() -> Win32Result<()> {
   if unsafe { BoundaryDescriptor.is_null() } {
     return Err(last_error!("Failed to create boundary descriptor"));
   }
-  let cleanupBoundaryDescriptor = Defered::new(|| {
-    unsafe { DeleteBoundaryDescriptor(BoundaryDescriptor) };
-  });
+  unsafe_defer! { cleanupBoundaryDescriptor <-
+    DeleteBoundaryDescriptor(BoundaryDescriptor);
+  };
   let result = unsafe {
     AddSIDToBoundaryDescriptor(BoundaryDescriptor.get_mut_ptr(), Sid.as_mut_ptr() as *mut _)
   };

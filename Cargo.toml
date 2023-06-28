@@ -9,7 +9,6 @@ edition = "2021"
 get-last-error = "0.1.1"
 lazy_static = "1.4.0"
 rand = "0.8.5"
-widestring = "1.0.2"
 winapi = { version = "0.3.9", features = [
   "netioapi",
   "minwindef",

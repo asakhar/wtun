@@ -1,8 +1,13 @@
 use std::{mem::size_of, time::SystemTime};
 
-use cutils::{set_last_error, ignore::ResultIgnoreExt, Win32Result, Win32ErrorToResultExt, inspection::{CastToMutVoidPtrExt, GetPtrExt}};
+use cutils::{
+  ignore::ResultIgnoreExt,
+  inspection::{CastToMutVoidPtrExt, GetPtrExt},
+  set_last_error,
+  strings::WideCString,
+  widecstr, widecstring, Win32ErrorToResultExt, Win32Result,
+};
 use get_last_error::Win32Error;
-use widestring::{widecstr, WideCString};
 use winapi::{
   shared::{
     minwindef::{DWORD, HKEY, LPVOID, ULONG},
@@ -66,91 +71,100 @@ pub fn set_logger(new_logger: LoggerCallback) -> LoggerCallback {
   std::mem::replace(&mut WINTUN_LOGGER.logger.write().ignore(), new_logger)
 }
 
-#[macro_export]
-macro_rules! log {
-  ($level:expr, $fmt:literal, $($args:expr),*) => {
-    {
-      let log_line = format!($fmt, $($args),*);
-      $crate::logger::WINTUN_LOGGER.log($level, &log_line)
-    }
-  };
-  ($level:expr, $fmt:literal) => {
-    {
-      $crate::logger::WINTUN_LOGGER.log($level, $fmt)
-    }
-  };
+mod macro_impl {
+
+  macro_rules! log {
+    ($level:expr, $fmt:literal, $($args:expr),*) => {
+      {
+        let log_line = format!($fmt, $($args),*);
+        $crate::logger::WINTUN_LOGGER.log($level, &log_line)
+      }
+    };
+    ($level:expr, $fmt:literal) => {
+      {
+        $crate::logger::WINTUN_LOGGER.log($level, $fmt)
+      }
+    };
+  }
+
+  macro_rules! info {
+    ($fmt:literal, $($args:expr),*) => {
+      {
+        let log_line = format!($fmt, $($args),*);
+        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Info, &log_line)
+      }
+    };
+    ($fmt:literal) => {
+      {
+        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Info, $fmt)
+      }
+    };
+  }
+
+  macro_rules! warning {
+    ($fmt:literal, $($args:expr),*) => {
+      {
+        let log_line = format!($fmt, $($args),*);
+        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Warning, &log_line)
+      }
+    };
+    ($fmt:literal) => {
+      {
+        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Warning, $fmt)
+      }
+    };
+  }
+
+  macro_rules! error {
+    ($error:expr, $fmt:literal, $($args:expr),*) => {
+      {
+        let log_line = format!($fmt, $($args),*);
+        $crate::logger::WINTUN_LOGGER.error($error, &log_line)
+      }
+    };
+    ($error:expr, $fmt:literal) => {
+      {
+        $crate::logger::WINTUN_LOGGER.error($error, $fmt)
+      }
+    };
+  }
+
+  macro_rules! last_error {
+    ($fmt:literal, $($args:expr),*) => {
+      {
+        let LastError = get_last_error::Win32Error::get_last_error();
+        let res = $crate::logger::error!(LastError, $fmt, $($args),*);
+        cutils::set_last_error(LastError);
+        res
+      }
+    };
+    ($fmt:literal) => {
+      {
+        let LastError = get_last_error::Win32Error::get_last_error();
+        let res = $crate::logger::error!(LastError, $fmt);
+        cutils::set_last_error(LastError);
+        res
+      }
+    };
+  }
+  pub(crate) use error;
+  pub(crate) use info;
+  pub(crate) use last_error;
+  pub(crate) use log;
+  pub(crate) use warning;
 }
 
-#[macro_export]
-macro_rules! info {
-  ($fmt:literal, $($args:expr),*) => {
-    {
-      let log_line = format!($fmt, $($args),*);
-      $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Info, &log_line)
-    }
-  };
-  ($fmt:literal) => {
-    {
-      $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Info, $fmt)
-    }
-  };
-}
-
-#[macro_export]
-macro_rules! warn {
-  ($fmt:literal, $($args:expr),*) => {
-    {
-      let log_line = format!($fmt, $($args),*);
-      $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Warning, &log_line)
-    }
-  };
-  ($fmt:literal) => {
-    {
-      $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Warning, $fmt)
-    }
-  };
-}
-
-#[macro_export]
-macro_rules! error {
-  ($error:expr, $fmt:literal, $($args:expr),*) => {
-    {
-      let log_line = format!($fmt, $($args),*);
-      $crate::logger::WINTUN_LOGGER.error($error, &log_line)
-    }
-  };
-  ($error:expr, $fmt:literal) => {
-    {
-      $crate::logger::WINTUN_LOGGER.error($error, $fmt)
-    }
-  };
-}
-
-#[macro_export]
-macro_rules! last_error {
-  ($fmt:literal, $($args:expr),*) => {
-    {
-      let LastError = get_last_error::Win32Error::get_last_error();
-      let res = $crate::error!(LastError, $fmt, $($args),*);
-      cutils::set_last_error(LastError);
-      res
-    }
-  };
-  ($fmt:literal) => {
-    {
-      let LastError = get_last_error::Win32Error::get_last_error();
-      let res = $crate::error!(LastError, $fmt);
-      cutils::set_last_error(LastError);
-      res
-    }
-  };
-}
+pub(crate) use macro_impl::error;
+pub(crate) use macro_impl::info;
+pub(crate) use macro_impl::last_error;
+pub(crate) use macro_impl::log;
+pub(crate) use macro_impl::warning as warn;
 
 fn LoggerGetRegistryKeyPathImpl(Key: HKEY) -> WideCString {
   if Key.is_null() {
     return widecstr!("<null>").to_owned();
   }
-  let error_case_ret = WideCString::from_str(format!("0x{Key:p}")).unwrap();
+  let error_case_ret = widecstring!("0x{:p}", Key);
   let mut KeyNameInfo: KEY_NAME_INFORMATION = KEY_NAME_INFORMATION {
     NameLength: 0,
     Name: [0; MAX_REG_PATH],
@@ -174,7 +188,7 @@ fn LoggerGetRegistryKeyPathImpl(Key: HKEY) -> WideCString {
     return error_case_ret;
   }
   KeyNameInfo.NameLength /= size_of::<WCHAR>() as u32;
-  unsafe { WideCString::from_ptr(KeyNameInfo.Name.as_ptr(), KeyNameInfo.NameLength as usize) }
+  unsafe { WideCString::from_ptr_n(KeyNameInfo.Name.as_ptr(), KeyNameInfo.NameLength as usize) }
     .unwrap_or(error_case_ret)
 }
 
