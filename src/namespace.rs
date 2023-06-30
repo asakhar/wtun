@@ -1,6 +1,6 @@
 use std::cell::UnsafeCell;
 
-use cutils::{unsafe_defer, inspection::GetPtrExt, strings::WideCStr, widecstr, Win32Result};
+use cutils::{inspection::GetPtrExt, strings::WideCStr, unsafe_defer, widecstr, Win32Result};
 use get_last_error::Win32Error;
 use lazy_static::lazy_static;
 use winapi::{
@@ -28,8 +28,8 @@ use winapi::{
 };
 
 use crate::{
-  logger::{last_error, error},
-  wmain::{IsLocalSystem, SecurityAttributes},
+  logger::{error, last_error},
+  wmain::get_system_params,
 };
 
 pub struct SystemNamedMutexLock(HANDLE);
@@ -44,7 +44,14 @@ impl SystemNamedMutexLock {
   pub fn take(name: impl AsRef<WideCStr>) -> Win32Result<Self> {
     NamespaceRuntimeInit()?;
     let name = name.as_ref();
-    let Mutex = unsafe { CreateMutexW(SecurityAttributes.get_mut_ptr(), FALSE, name.as_ptr()) };
+    let system_params = unsafe { get_system_params() };
+    let Mutex = unsafe {
+      CreateMutexW(
+        system_params.SecurityAttributes.get_mut_ptr(),
+        FALSE,
+        name.as_ptr(),
+      )
+    };
     if Mutex.is_null() {
       return Err(last_error!("Failed to create {} mutex", name.display()));
     }
@@ -139,9 +146,10 @@ fn NamespaceRuntimeInit() -> Win32Result<()> {
 
   let mut Sid = [0 as BYTE; MAX_SID_SIZE];
   let mut SidSize = std::mem::size_of_val(&Sid) as DWORD;
+  let system_params = unsafe { get_system_params() };
   let result = unsafe {
     CreateWellKnownSid(
-      if IsLocalSystem {
+      if system_params.IsLocalSystem {
         WinLocalSystemSid
       } else {
         WinBuiltinAdministratorsSid
@@ -167,10 +175,11 @@ fn NamespaceRuntimeInit() -> Win32Result<()> {
   if result == FALSE {
     return Err(last_error!("Failed to add SID to boundary descriptor"));
   }
+  let system_params = unsafe { get_system_params() };
   loop {
     unsafe {
       PrivateNamespace = CreatePrivateNamespaceW(
-        SecurityAttributes.get_mut_ptr(),
+        system_params.SecurityAttributes.get_mut_ptr(),
         BoundaryDescriptor,
         widecstr!("Wintun").as_ptr(),
       )

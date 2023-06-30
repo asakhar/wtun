@@ -72,7 +72,7 @@ extern "C" {
    * Or just read from KUSER_SHARED_DATA the same way on 32-bit and 64-bit:
    *    *(DWORD *)0x7FFE026C
    */
-  fn RtlGetNtVersionNumbers(
+  pub fn RtlGetNtVersionNumbers(
     /*_Out_*/ MajorVersion: *mut DWORD,
     /*_Out_*/ MinorVersion: *mut DWORD,
     /*_Out_*/ BuildNumber: *mut DWORD,
