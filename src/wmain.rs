@@ -1,7 +1,7 @@
 use cutils::{
   csizeof, cstr,
   inspection::{CastToMutVoidPtrExt, GetPtrExt, InitZeroed},
-  unsafe_defer, widecstr, Win32Result,
+  unsafe_defer, widecstr
 };
 use winapi::{
   shared::{
@@ -66,7 +66,7 @@ pub unsafe fn get_system_params<'a>() -> &'a mut SystemParams {
   });
   params
 }
-fn InitializeSecurityObjects() -> Win32Result<(SECURITY_ATTRIBUTES, bool)> {
+fn InitializeSecurityObjects() -> std::io::Result<(SECURITY_ATTRIBUTES, bool)> {
   let mut SecurityAttributes = SECURITY_ATTRIBUTES {
     nLength: csizeof!(SECURITY_ATTRIBUTES),
     lpSecurityDescriptor: std::ptr::null_mut(),

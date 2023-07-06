@@ -2,7 +2,6 @@ use cutils::{
   check_handle,
   inspection::{CastToMutVoidPtrExt, GetPtrExt},
   strings::{WideCStr, WideCString},
-  Win32Result,
 };
 use get_last_error::Win32Error;
 use winapi::{
@@ -54,7 +53,7 @@ impl RegKey {
     HwProfile: DWORD,
     KeyType: DWORD,
     samDesired: REGSAM,
-  ) -> Win32Result<Self> {
+  ) -> std::io::Result<Self> {
     let Key: HKEY = unsafe {
       SetupDiOpenDevRegKey(
         DeviceInfoSet,
@@ -106,7 +105,7 @@ impl Drop for RegKey {
 pub fn RegistryGetString(
   value: Box<[u8]>,
   value_type: RegistryValueType,
-) -> Win32Result<WideCString> {
+) -> std::io::Result<WideCString> {
   if value.len() & 1 != 0 {
     return Err(Win32Error::new(ERROR_INVALID_DATA));
   }
@@ -163,7 +162,7 @@ pub fn RegistryQueryString(
   Key: &RegKey,
   Name: impl AsRef<WideCStr>,
   Log: bool,
-) -> Win32Result<WideCString> {
+) -> std::io::Result<WideCString> {
   let Name = Name.as_ref();
   let mut ValueType = 0;
   let Size = std::mem::size_of::<WCHAR>() as DWORD * 256;
@@ -206,7 +205,7 @@ pub fn RegistryQueryDWORD(
   Key: &RegKey,
   Name: impl AsRef<WideCStr>,
   Log: bool,
-) -> Win32Result<DWORD> {
+) -> std::io::Result<DWORD> {
   let mut ValueType = REG_DWORD;
   let mut Size = std::mem::size_of::<DWORD>();
   let mut Value: DWORD = 0;
@@ -264,7 +263,7 @@ fn RegistryQuery(
   ValueType: &mut DWORD,
   mut BufLen: DWORD,
   Log: bool,
-) -> Win32Result<Box<[u8]>> {
+) -> std::io::Result<Box<[u8]>> {
   let NamePtr = Name.as_ptr();
   let mut p = vec![0 as BYTE; BufLen as usize];
   loop {

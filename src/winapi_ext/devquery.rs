@@ -3614,6 +3614,7 @@ fn bindgen_test_layout___crt_locale_pointers() {
   );
 }
 pub type _locale_t = *mut __crt_locale_pointers;
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct _Mbstatet {
@@ -4036,114 +4037,9 @@ pub type PCNZTCH = PCNZCH;
 pub type PCUNZTCH = PCNZCH;
 pub type PSHORT = *mut SHORT;
 pub type PLONG = *mut LONG;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _PROCESSOR_NUMBER {
-  pub Group: WORD,
-  pub Number: BYTE,
-  pub Reserved: BYTE,
-}
-#[test]
-fn bindgen_test_layout__PROCESSOR_NUMBER() {
-  const UNINIT: ::std::mem::MaybeUninit<_PROCESSOR_NUMBER> = ::std::mem::MaybeUninit::uninit();
-  let ptr = UNINIT.as_ptr();
-  assert_eq!(
-    ::std::mem::size_of::<_PROCESSOR_NUMBER>(),
-    4usize,
-    concat!("Size of: ", stringify!(_PROCESSOR_NUMBER))
-  );
-  assert_eq!(
-    ::std::mem::align_of::<_PROCESSOR_NUMBER>(),
-    2usize,
-    concat!("Alignment of ", stringify!(_PROCESSOR_NUMBER))
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).Group) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_PROCESSOR_NUMBER),
-      "::",
-      stringify!(Group)
-    )
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).Number) as usize - ptr as usize },
-    2usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_PROCESSOR_NUMBER),
-      "::",
-      stringify!(Number)
-    )
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).Reserved) as usize - ptr as usize },
-    3usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_PROCESSOR_NUMBER),
-      "::",
-      stringify!(Reserved)
-    )
-  );
-}
-pub type PROCESSOR_NUMBER = _PROCESSOR_NUMBER;
-pub type PPROCESSOR_NUMBER = *mut _PROCESSOR_NUMBER;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _GROUP_AFFINITY {
-  pub Mask: KAFFINITY,
-  pub Group: WORD,
-  pub Reserved: [WORD; 3usize],
-}
-#[test]
-fn bindgen_test_layout__GROUP_AFFINITY() {
-  const UNINIT: ::std::mem::MaybeUninit<_GROUP_AFFINITY> = ::std::mem::MaybeUninit::uninit();
-  let ptr = UNINIT.as_ptr();
-  assert_eq!(
-    ::std::mem::size_of::<_GROUP_AFFINITY>(),
-    16usize,
-    concat!("Size of: ", stringify!(_GROUP_AFFINITY))
-  );
-  assert_eq!(
-    ::std::mem::align_of::<_GROUP_AFFINITY>(),
-    8usize,
-    concat!("Alignment of ", stringify!(_GROUP_AFFINITY))
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).Mask) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_GROUP_AFFINITY),
-      "::",
-      stringify!(Mask)
-    )
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).Group) as usize - ptr as usize },
-    8usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_GROUP_AFFINITY),
-      "::",
-      stringify!(Group)
-    )
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).Reserved) as usize - ptr as usize },
-    10usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_GROUP_AFFINITY),
-      "::",
-      stringify!(Reserved)
-    )
-  );
-}
-pub type GROUP_AFFINITY = _GROUP_AFFINITY;
-pub type PGROUP_AFFINITY = *mut _GROUP_AFFINITY;
+
+pub type PPROCESSOR_NUMBER = *mut PROCESSOR_NUMBER;
+pub type PGROUP_AFFINITY = *mut GROUP_AFFINITY;
 pub type HANDLE = *mut ::std::os::raw::c_void;
 pub type PHANDLE = *mut HANDLE;
 pub type FCHAR = BYTE;
@@ -4158,357 +4054,19 @@ pub const COMPARTMENT_ID_UNSPECIFIED_COMPARTMENT_ID: COMPARTMENT_ID = 0;
 pub const COMPARTMENT_ID_DEFAULT_COMPARTMENT_ID: COMPARTMENT_ID = 1;
 pub type COMPARTMENT_ID = ::std::os::raw::c_int;
 pub type PCOMPARTMENT_ID = *mut COMPARTMENT_ID;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _FLOAT128 {
-  pub LowPart: ::std::os::raw::c_longlong,
-  pub HighPart: ::std::os::raw::c_longlong,
-}
-#[test]
-fn bindgen_test_layout__FLOAT128() {
-  const UNINIT: ::std::mem::MaybeUninit<_FLOAT128> = ::std::mem::MaybeUninit::uninit();
-  let ptr = UNINIT.as_ptr();
-  assert_eq!(
-    ::std::mem::size_of::<_FLOAT128>(),
-    16usize,
-    concat!("Size of: ", stringify!(_FLOAT128))
-  );
-  assert_eq!(
-    ::std::mem::align_of::<_FLOAT128>(),
-    8usize,
-    concat!("Alignment of ", stringify!(_FLOAT128))
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).LowPart) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_FLOAT128),
-      "::",
-      stringify!(LowPart)
-    )
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).HighPart) as usize - ptr as usize },
-    8usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_FLOAT128),
-      "::",
-      stringify!(HighPart)
-    )
-  );
-}
-pub type FLOAT128 = _FLOAT128;
 pub type PFLOAT128 = *mut FLOAT128;
 pub type LONGLONG = ::std::os::raw::c_longlong;
 pub type ULONGLONG = ::std::os::raw::c_ulonglong;
 pub type PLONGLONG = *mut LONGLONG;
 pub type PULONGLONG = *mut ULONGLONG;
 pub type USN = LONGLONG;
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union _LARGE_INTEGER {
-  pub __bindgen_anon_1: _LARGE_INTEGER__bindgen_ty_1,
-  pub u: _LARGE_INTEGER__bindgen_ty_2,
-  pub QuadPart: LONGLONG,
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _LARGE_INTEGER__bindgen_ty_1 {
-  pub LowPart: DWORD,
-  pub HighPart: LONG,
-}
-#[test]
-fn bindgen_test_layout__LARGE_INTEGER__bindgen_ty_1() {
-  const UNINIT: ::std::mem::MaybeUninit<_LARGE_INTEGER__bindgen_ty_1> =
-    ::std::mem::MaybeUninit::uninit();
-  let ptr = UNINIT.as_ptr();
-  assert_eq!(
-    ::std::mem::size_of::<_LARGE_INTEGER__bindgen_ty_1>(),
-    8usize,
-    concat!("Size of: ", stringify!(_LARGE_INTEGER__bindgen_ty_1))
-  );
-  assert_eq!(
-    ::std::mem::align_of::<_LARGE_INTEGER__bindgen_ty_1>(),
-    4usize,
-    concat!("Alignment of ", stringify!(_LARGE_INTEGER__bindgen_ty_1))
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).LowPart) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_LARGE_INTEGER__bindgen_ty_1),
-      "::",
-      stringify!(LowPart)
-    )
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).HighPart) as usize - ptr as usize },
-    4usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_LARGE_INTEGER__bindgen_ty_1),
-      "::",
-      stringify!(HighPart)
-    )
-  );
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _LARGE_INTEGER__bindgen_ty_2 {
-  pub LowPart: DWORD,
-  pub HighPart: LONG,
-}
-#[test]
-fn bindgen_test_layout__LARGE_INTEGER__bindgen_ty_2() {
-  const UNINIT: ::std::mem::MaybeUninit<_LARGE_INTEGER__bindgen_ty_2> =
-    ::std::mem::MaybeUninit::uninit();
-  let ptr = UNINIT.as_ptr();
-  assert_eq!(
-    ::std::mem::size_of::<_LARGE_INTEGER__bindgen_ty_2>(),
-    8usize,
-    concat!("Size of: ", stringify!(_LARGE_INTEGER__bindgen_ty_2))
-  );
-  assert_eq!(
-    ::std::mem::align_of::<_LARGE_INTEGER__bindgen_ty_2>(),
-    4usize,
-    concat!("Alignment of ", stringify!(_LARGE_INTEGER__bindgen_ty_2))
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).LowPart) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_LARGE_INTEGER__bindgen_ty_2),
-      "::",
-      stringify!(LowPart)
-    )
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).HighPart) as usize - ptr as usize },
-    4usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_LARGE_INTEGER__bindgen_ty_2),
-      "::",
-      stringify!(HighPart)
-    )
-  );
-}
-#[test]
-fn bindgen_test_layout__LARGE_INTEGER() {
-  const UNINIT: ::std::mem::MaybeUninit<_LARGE_INTEGER> = ::std::mem::MaybeUninit::uninit();
-  let ptr = UNINIT.as_ptr();
-  assert_eq!(
-    ::std::mem::size_of::<_LARGE_INTEGER>(),
-    8usize,
-    concat!("Size of: ", stringify!(_LARGE_INTEGER))
-  );
-  assert_eq!(
-    ::std::mem::align_of::<_LARGE_INTEGER>(),
-    8usize,
-    concat!("Alignment of ", stringify!(_LARGE_INTEGER))
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).u) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_LARGE_INTEGER),
-      "::",
-      stringify!(u)
-    )
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).QuadPart) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_LARGE_INTEGER),
-      "::",
-      stringify!(QuadPart)
-    )
-  );
-}
-pub type LARGE_INTEGER = _LARGE_INTEGER;
 pub type PLARGE_INTEGER = *mut LARGE_INTEGER;
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union _ULARGE_INTEGER {
-  pub __bindgen_anon_1: _ULARGE_INTEGER__bindgen_ty_1,
-  pub u: _ULARGE_INTEGER__bindgen_ty_2,
-  pub QuadPart: ULONGLONG,
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _ULARGE_INTEGER__bindgen_ty_1 {
-  pub LowPart: DWORD,
-  pub HighPart: DWORD,
-}
-#[test]
-fn bindgen_test_layout__ULARGE_INTEGER__bindgen_ty_1() {
-  const UNINIT: ::std::mem::MaybeUninit<_ULARGE_INTEGER__bindgen_ty_1> =
-    ::std::mem::MaybeUninit::uninit();
-  let ptr = UNINIT.as_ptr();
-  assert_eq!(
-    ::std::mem::size_of::<_ULARGE_INTEGER__bindgen_ty_1>(),
-    8usize,
-    concat!("Size of: ", stringify!(_ULARGE_INTEGER__bindgen_ty_1))
-  );
-  assert_eq!(
-    ::std::mem::align_of::<_ULARGE_INTEGER__bindgen_ty_1>(),
-    4usize,
-    concat!("Alignment of ", stringify!(_ULARGE_INTEGER__bindgen_ty_1))
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).LowPart) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_ULARGE_INTEGER__bindgen_ty_1),
-      "::",
-      stringify!(LowPart)
-    )
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).HighPart) as usize - ptr as usize },
-    4usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_ULARGE_INTEGER__bindgen_ty_1),
-      "::",
-      stringify!(HighPart)
-    )
-  );
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _ULARGE_INTEGER__bindgen_ty_2 {
-  pub LowPart: DWORD,
-  pub HighPart: DWORD,
-}
-#[test]
-fn bindgen_test_layout__ULARGE_INTEGER__bindgen_ty_2() {
-  const UNINIT: ::std::mem::MaybeUninit<_ULARGE_INTEGER__bindgen_ty_2> =
-    ::std::mem::MaybeUninit::uninit();
-  let ptr = UNINIT.as_ptr();
-  assert_eq!(
-    ::std::mem::size_of::<_ULARGE_INTEGER__bindgen_ty_2>(),
-    8usize,
-    concat!("Size of: ", stringify!(_ULARGE_INTEGER__bindgen_ty_2))
-  );
-  assert_eq!(
-    ::std::mem::align_of::<_ULARGE_INTEGER__bindgen_ty_2>(),
-    4usize,
-    concat!("Alignment of ", stringify!(_ULARGE_INTEGER__bindgen_ty_2))
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).LowPart) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_ULARGE_INTEGER__bindgen_ty_2),
-      "::",
-      stringify!(LowPart)
-    )
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).HighPart) as usize - ptr as usize },
-    4usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_ULARGE_INTEGER__bindgen_ty_2),
-      "::",
-      stringify!(HighPart)
-    )
-  );
-}
-#[test]
-fn bindgen_test_layout__ULARGE_INTEGER() {
-  const UNINIT: ::std::mem::MaybeUninit<_ULARGE_INTEGER> = ::std::mem::MaybeUninit::uninit();
-  let ptr = UNINIT.as_ptr();
-  assert_eq!(
-    ::std::mem::size_of::<_ULARGE_INTEGER>(),
-    8usize,
-    concat!("Size of: ", stringify!(_ULARGE_INTEGER))
-  );
-  assert_eq!(
-    ::std::mem::align_of::<_ULARGE_INTEGER>(),
-    8usize,
-    concat!("Alignment of ", stringify!(_ULARGE_INTEGER))
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).u) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_ULARGE_INTEGER),
-      "::",
-      stringify!(u)
-    )
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).QuadPart) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_ULARGE_INTEGER),
-      "::",
-      stringify!(QuadPart)
-    )
-  );
-}
-pub type ULARGE_INTEGER = _ULARGE_INTEGER;
 pub type PULARGE_INTEGER = *mut ULARGE_INTEGER;
 pub type RTL_REFERENCE_COUNT = LONG_PTR;
 pub type PRTL_REFERENCE_COUNT = *mut LONG_PTR;
 pub type RTL_REFERENCE_COUNT32 = LONG;
 pub type PRTL_REFERENCE_COUNT32 = *mut LONG;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _LUID {
-  pub LowPart: DWORD,
-  pub HighPart: LONG,
-}
-#[test]
-fn bindgen_test_layout__LUID() {
-  const UNINIT: ::std::mem::MaybeUninit<_LUID> = ::std::mem::MaybeUninit::uninit();
-  let ptr = UNINIT.as_ptr();
-  assert_eq!(
-    ::std::mem::size_of::<_LUID>(),
-    8usize,
-    concat!("Size of: ", stringify!(_LUID))
-  );
-  assert_eq!(
-    ::std::mem::align_of::<_LUID>(),
-    4usize,
-    concat!("Alignment of ", stringify!(_LUID))
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).LowPart) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_LUID),
-      "::",
-      stringify!(LowPart)
-    )
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).HighPart) as usize - ptr as usize },
-    4usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_LUID),
-      "::",
-      stringify!(HighPart)
-    )
-  );
-}
-pub type LUID = _LUID;
-pub type PLUID = *mut _LUID;
+pub type PLUID = *mut LUID;
 pub type DWORDLONG = ULONGLONG;
 pub type PDWORDLONG = *mut DWORDLONG;
 extern "C" {
@@ -4561,123 +4119,12 @@ extern "C" {
 }
 pub type BOOLEAN = BYTE;
 pub type PBOOLEAN = *mut BOOLEAN;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _LIST_ENTRY {
-  pub Flink: *mut _LIST_ENTRY,
-  pub Blink: *mut _LIST_ENTRY,
-}
-#[test]
-fn bindgen_test_layout__LIST_ENTRY() {
-  const UNINIT: ::std::mem::MaybeUninit<_LIST_ENTRY> = ::std::mem::MaybeUninit::uninit();
-  let ptr = UNINIT.as_ptr();
-  assert_eq!(
-    ::std::mem::size_of::<_LIST_ENTRY>(),
-    16usize,
-    concat!("Size of: ", stringify!(_LIST_ENTRY))
-  );
-  assert_eq!(
-    ::std::mem::align_of::<_LIST_ENTRY>(),
-    8usize,
-    concat!("Alignment of ", stringify!(_LIST_ENTRY))
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).Flink) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_LIST_ENTRY),
-      "::",
-      stringify!(Flink)
-    )
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).Blink) as usize - ptr as usize },
-    8usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_LIST_ENTRY),
-      "::",
-      stringify!(Blink)
-    )
-  );
-}
-pub type LIST_ENTRY = _LIST_ENTRY;
-pub type PLIST_ENTRY = *mut _LIST_ENTRY;
-pub type PRLIST_ENTRY = *mut _LIST_ENTRY;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct _SINGLE_LIST_ENTRY {
-  pub Next: *mut _SINGLE_LIST_ENTRY,
-}
-#[test]
-fn bindgen_test_layout__SINGLE_LIST_ENTRY() {
-  const UNINIT: ::std::mem::MaybeUninit<_SINGLE_LIST_ENTRY> = ::std::mem::MaybeUninit::uninit();
-  let ptr = UNINIT.as_ptr();
-  assert_eq!(
-    ::std::mem::size_of::<_SINGLE_LIST_ENTRY>(),
-    8usize,
-    concat!("Size of: ", stringify!(_SINGLE_LIST_ENTRY))
-  );
-  assert_eq!(
-    ::std::mem::align_of::<_SINGLE_LIST_ENTRY>(),
-    8usize,
-    concat!("Alignment of ", stringify!(_SINGLE_LIST_ENTRY))
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).Next) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(_SINGLE_LIST_ENTRY),
-      "::",
-      stringify!(Next)
-    )
-  );
-}
-pub type SINGLE_LIST_ENTRY = _SINGLE_LIST_ENTRY;
-pub type PSINGLE_LIST_ENTRY = *mut _SINGLE_LIST_ENTRY;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct LIST_ENTRY32 {
-  pub Flink: DWORD,
-  pub Blink: DWORD,
-}
-#[test]
-fn bindgen_test_layout_LIST_ENTRY32() {
-  const UNINIT: ::std::mem::MaybeUninit<LIST_ENTRY32> = ::std::mem::MaybeUninit::uninit();
-  let ptr = UNINIT.as_ptr();
-  assert_eq!(
-    ::std::mem::size_of::<LIST_ENTRY32>(),
-    8usize,
-    concat!("Size of: ", stringify!(LIST_ENTRY32))
-  );
-  assert_eq!(
-    ::std::mem::align_of::<LIST_ENTRY32>(),
-    4usize,
-    concat!("Alignment of ", stringify!(LIST_ENTRY32))
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).Flink) as usize - ptr as usize },
-    0usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(LIST_ENTRY32),
-      "::",
-      stringify!(Flink)
-    )
-  );
-  assert_eq!(
-    unsafe { ::std::ptr::addr_of!((*ptr).Blink) as usize - ptr as usize },
-    4usize,
-    concat!(
-      "Offset of field: ",
-      stringify!(LIST_ENTRY32),
-      "::",
-      stringify!(Blink)
-    )
-  );
-}
+
+pub type PLIST_ENTRY = *mut LIST_ENTRY;
+pub type PRLIST_ENTRY = *mut LIST_ENTRY;
+
+pub type PSINGLE_LIST_ENTRY = *mut SINGLE_LIST_ENTRY;
+
 pub type PLIST_ENTRY32 = *mut LIST_ENTRY32;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -5587,6 +5034,16 @@ pub const _EXCEPTION_DISPOSITION_ExceptionContinueSearch: _EXCEPTION_DISPOSITION
 pub const _EXCEPTION_DISPOSITION_ExceptionNestedException: _EXCEPTION_DISPOSITION = 2;
 pub const _EXCEPTION_DISPOSITION_ExceptionCollidedUnwind: _EXCEPTION_DISPOSITION = 3;
 pub type _EXCEPTION_DISPOSITION = ::std::os::raw::c_int;
+use winapi::shared::ntdef::FLOAT128;
+use winapi::shared::ntdef::GROUP_AFFINITY;
+use winapi::shared::ntdef::LIST_ENTRY;
+use winapi::shared::ntdef::LIST_ENTRY32;
+use winapi::shared::ntdef::PROCESSOR_NUMBER;
+use winapi::shared::ntdef::SINGLE_LIST_ENTRY;
+use winapi::um::winnt::LARGE_INTEGER;
+use winapi::um::winnt::LUID;
+use winapi::um::winnt::ULARGE_INTEGER;
+
 pub use self::_EXCEPTION_DISPOSITION as EXCEPTION_DISPOSITION;
 extern "C" {
   pub fn __C_specific_handler(
@@ -12344,7 +11801,7 @@ fn bindgen_test_layout__GENERIC_MAPPING() {
 pub type GENERIC_MAPPING = _GENERIC_MAPPING;
 pub type PGENERIC_MAPPING = *mut GENERIC_MAPPING;
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct _LUID_AND_ATTRIBUTES {
   pub Luid: LUID,
   pub Attributes: DWORD,
@@ -14718,7 +14175,7 @@ pub type _AUDIT_EVENT_TYPE = ::std::os::raw::c_int;
 pub use self::_AUDIT_EVENT_TYPE as AUDIT_EVENT_TYPE;
 pub type PAUDIT_EVENT_TYPE = *mut _AUDIT_EVENT_TYPE;
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct _PRIVILEGE_SET {
   pub PrivilegeCount: DWORD,
   pub Control: DWORD,
@@ -15328,7 +14785,7 @@ fn bindgen_test_layout__TOKEN_GROUPS() {
 pub type TOKEN_GROUPS = _TOKEN_GROUPS;
 pub type PTOKEN_GROUPS = *mut _TOKEN_GROUPS;
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct _TOKEN_PRIVILEGES {
   pub PrivilegeCount: DWORD,
   pub Privileges: [LUID_AND_ATTRIBUTES; 1usize],
@@ -15531,7 +14988,7 @@ fn bindgen_test_layout__TOKEN_DEVICE_CLAIMS() {
 pub type TOKEN_DEVICE_CLAIMS = _TOKEN_DEVICE_CLAIMS;
 pub type PTOKEN_DEVICE_CLAIMS = *mut _TOKEN_DEVICE_CLAIMS;
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct _TOKEN_GROUPS_AND_PRIVILEGES {
   pub SidCount: DWORD,
   pub SidLength: DWORD,
@@ -15793,7 +15250,7 @@ pub type TOKEN_MANDATORY_POLICY = _TOKEN_MANDATORY_POLICY;
 pub type PTOKEN_MANDATORY_POLICY = *mut _TOKEN_MANDATORY_POLICY;
 pub type PSECURITY_ATTRIBUTES_OPAQUE = PVOID;
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct _TOKEN_ACCESS_INFORMATION {
   pub SidHash: PSID_AND_ATTRIBUTES_HASH,
   pub RestrictedSidHash: PSID_AND_ATTRIBUTES_HASH,
@@ -15990,7 +15447,7 @@ fn bindgen_test_layout__TOKEN_AUDIT_POLICY() {
 pub type TOKEN_AUDIT_POLICY = _TOKEN_AUDIT_POLICY;
 pub type PTOKEN_AUDIT_POLICY = *mut _TOKEN_AUDIT_POLICY;
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct _TOKEN_SOURCE {
   pub SourceName: [CHAR; 8usize],
   pub SourceIdentifier: LUID,
@@ -16164,7 +15621,7 @@ fn bindgen_test_layout__TOKEN_STATISTICS() {
 pub type TOKEN_STATISTICS = _TOKEN_STATISTICS;
 pub type PTOKEN_STATISTICS = *mut _TOKEN_STATISTICS;
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct _TOKEN_CONTROL {
   pub TokenId: LUID,
   pub AuthenticationId: LUID,
@@ -16229,7 +15686,7 @@ fn bindgen_test_layout__TOKEN_CONTROL() {
 pub type TOKEN_CONTROL = _TOKEN_CONTROL;
 pub type PTOKEN_CONTROL = *mut _TOKEN_CONTROL;
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct _TOKEN_ORIGIN {
   pub OriginatingLogonSession: LUID,
 }
@@ -24742,7 +24199,7 @@ fn bindgen_test_layout__SYSTEM_LOGICAL_PROCESSOR_INFORMATION() {
 pub type SYSTEM_LOGICAL_PROCESSOR_INFORMATION = _SYSTEM_LOGICAL_PROCESSOR_INFORMATION;
 pub type PSYSTEM_LOGICAL_PROCESSOR_INFORMATION = *mut _SYSTEM_LOGICAL_PROCESSOR_INFORMATION;
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct _PROCESSOR_RELATIONSHIP {
   pub Flags: BYTE,
   pub EfficiencyClass: BYTE,
@@ -47739,7 +47196,7 @@ extern "C" {
   ) -> DWORD;
 }
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct _RTL_CRITICAL_SECTION_DEBUG {
   pub Type: WORD,
   pub CreatorBackTraceIndex: WORD,

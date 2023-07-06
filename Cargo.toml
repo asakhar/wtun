@@ -9,10 +9,37 @@ edition = "2021"
 get-last-error = "0.1.1"
 lazy_static = "1.4.0"
 rand = "0.8.5"
-winapi = { version = "0.3.9", features = ["netioapi", "minwindef", "devpropdef", "setupapi", "cfgmgr32", "winerror", "processenv", "heapapi", "winnt", "handleapi", "combaseapi", "threadpoollegacyapiset", "synchapi", "winefs", "securitybaseapi", "namespaceapi", "devguid", "ipexport", "impl-debug", "devpkey", "corecrt", "winver", "sysinfoapi", "sddl", "wow64apiset"] }
+winapi = { version = "0.3.9", features = [
+  "netioapi",
+  "minwindef",
+  "devpropdef",
+  "setupapi",
+  "cfgmgr32",
+  "winerror",
+  "processenv",
+  "heapapi",
+  "winnt",
+  "handleapi",
+  "combaseapi",
+  "threadpoollegacyapiset",
+  "synchapi",
+  "winefs",
+  "securitybaseapi",
+  "namespaceapi",
+  "devguid",
+  "ipexport",
+  "impl-debug",
+  "devpkey",
+  "corecrt",
+  "winver",
+  "sysinfoapi",
+  "sddl",
+  "wow64apiset",
+] }
 cutils = { git = "https://github.com/asakhar/cutils.git" }
 
 [features]
-default = ["windows_10"]
+default = ["windows_10", "wow64_support"]
+wow64_support = []
 windows_7 = []
 windows_10 = []

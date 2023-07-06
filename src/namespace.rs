@@ -1,6 +1,6 @@
 use std::cell::UnsafeCell;
 
-use cutils::{inspection::GetPtrExt, strings::WideCStr, unsafe_defer, widecstr, Win32Result};
+use cutils::{inspection::GetPtrExt, strings::WideCStr, unsafe_defer, widecstr};
 use get_last_error::Win32Error;
 use lazy_static::lazy_static;
 use winapi::{
@@ -35,13 +35,13 @@ use crate::{
 pub struct SystemNamedMutexLock(HANDLE);
 
 impl SystemNamedMutexLock {
-  pub fn take_driver_installation_mutex() -> Win32Result<Self> {
+  pub fn take_driver_installation_mutex() -> std::io::Result<Self> {
     Self::take(widecstr!(r"Wintun\Wintun-Driver-Installation-Mutex"))
   }
-  pub fn take_device_installation_mutex() -> Win32Result<Self> {
+  pub fn take_device_installation_mutex() -> std::io::Result<Self> {
     Self::take(widecstr!(r"Wintun\Wintun-Device-Installation-Mutex"))
   }
-  pub fn take(name: impl AsRef<WideCStr>) -> Win32Result<Self> {
+  pub fn take(name: impl AsRef<WideCStr>) -> std::io::Result<Self> {
     NamespaceRuntimeInit()?;
     let name = name.as_ref();
     let system_params = unsafe { get_system_params() };
@@ -138,7 +138,7 @@ lazy_static! {
 static mut PrivateNamespace: HANDLE = std::ptr::null_mut();
 static mut BoundaryDescriptor: HANDLE = std::ptr::null_mut();
 
-fn NamespaceRuntimeInit() -> Win32Result<()> {
+fn NamespaceRuntimeInit() -> std::io::Result<()> {
   let section = unsafe { Initializing.enter() };
   if !unsafe { PrivateNamespace.is_null() } {
     return Ok(());

@@ -2,7 +2,7 @@ use cutils::{
   check_handle, defer,
   inspection::{CastToMutVoidPtrExt, GetPtrExt, InitZeroed},
   strings::{WideCStr, WideCString},
-  unsafe_defer, wide_array, widecstr, widecstring, Win32Result,
+  unsafe_defer, wide_array, widecstr, widecstring,
 };
 use get_last_error::Win32Error;
 use winapi::{
@@ -58,7 +58,7 @@ pub type SP_DEVINFO_DATA_LIST = LinkedList<SP_DEVINFO_DATA>;
 fn DisableAllOurAdapters(
   DevInfo: HDEVINFO,
   DisabledAdapters: &mut SP_DEVINFO_DATA_LIST,
-) -> Win32Result<()> {
+) -> std::io::Result<()> {
   let mut overall_result = Ok(());
   for EnumIndex in 0.. {
     let mut device = SP_DEVINFO_DATA {
@@ -127,7 +127,7 @@ fn DisableAllOurAdapters(
 fn EnableAllOurAdapters(
   DevInfo: HDEVINFO,
   AdaptersToEnable: &mut SP_DEVINFO_DATA_LIST,
-) -> Win32Result<()> {
+) -> std::io::Result<()> {
   let mut overall_result = Ok(());
   for device in AdaptersToEnable {
     let mut prop_type = unsafe { DEVPROPTYPE::init_zeroed() };
@@ -188,7 +188,7 @@ fn IsNewer(
   false
 }
 
-fn VersionOfFile(filename: &WideCStr) -> Win32Result<DWORD> {
+fn VersionOfFile(filename: &WideCStr) -> std::io::Result<DWORD> {
   let mut zero = 0;
   let len = unsafe { GetFileVersionInfoSizeW(filename.as_ptr(), zero.get_mut_ptr()) };
   if len == 0 {
@@ -243,7 +243,7 @@ fn VersionOfFile(filename: &WideCStr) -> Win32Result<DWORD> {
   Ok(version)
 }
 
-fn MaybeGetRunningDriverVersion(ReturnOneIfRunningInsteadOfVersion: bool) -> Win32Result<DWORD> {
+fn MaybeGetRunningDriverVersion(ReturnOneIfRunningInsteadOfVersion: bool) -> std::io::Result<DWORD> {
   let mut buffer_size: DWORD = 128 * 1024;
   let mut modules_buf = vec![0u64; (buffer_size / 8) as usize];
   loop {
@@ -291,7 +291,7 @@ fn MaybeGetRunningDriverVersion(ReturnOneIfRunningInsteadOfVersion: bool) -> Win
   Err(Win32Error::new(ERROR_FILE_NOT_FOUND))
 }
 
-pub fn WintunGetRunningDriverVersion() -> Win32Result<DWORD> {
+pub fn WintunGetRunningDriverVersion() -> std::io::Result<DWORD> {
   MaybeGetRunningDriverVersion(false)
 }
 
@@ -322,7 +322,7 @@ pub fn DriverInstallDeferredCleanup(
   }
 }
 
-pub fn DriverInstall() -> Win32Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
+pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
   let DriverInstallationLock = SystemNamedMutexLock::take_driver_installation_mutex()?;
   let DevInfo = unsafe {
     SetupDiCreateDeviceInfoListExW(
@@ -545,7 +545,7 @@ pub fn DriverInstall() -> Win32Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
   Ok((dev_info_existing_adapters, existing_adapters))
 }
 
-pub fn WintunDeleteDriver() -> Win32Result<()> {
+pub fn WintunDeleteDriver() -> std::io::Result<()> {
   AdapterCleanupOrphanedDevices();
   let driver_installation_lock = SystemNamedMutexLock::take_driver_installation_mutex()?;
   let dev_info = unsafe {

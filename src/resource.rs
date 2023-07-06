@@ -3,31 +3,33 @@ use std::{
   path::{Path, PathBuf},
 };
 
-use cutils::{Win32Result, strings::WideCStr};
+use cutils::{files::get_windows_dir_path};
 use get_last_error::Win32Error;
 use rand::Rng;
-use winapi::{
-  shared::{minwindef::MAX_PATH, ntdef::WCHAR},
-  um::sysinfoapi::GetWindowsDirectoryW,
-};
 
-use crate::logger::last_error;
+use crate::logger::error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResId {
   Cat,
   Sys,
   Inf,
+  SetupApiHostAmd64,
+  SetupApiHostArm64,
 }
 
-pub fn copy_to_file(dst: &Path, id: ResId) -> Win32Result<()> {
+pub fn copy_to_file(dst: &Path, id: ResId) -> std::io::Result<()> {
   const WINTUN_CAT: &[u8] = include_bytes!("driver-files/wintun.cat");
   const WINTUN_SYS: &[u8] = include_bytes!("driver-files/wintun.sys");
   const WINTUN_INF: &[u8] = include_bytes!("driver-files/wintun.inf");
+  const WINTUN_SETUP_API_HOST_AMD64: &[u8] = include_bytes!("driver-files/setupapihost-amd64.dll");
+  const WINTUN_SETUP_API_HOST_ARM64: &[u8] = include_bytes!("driver-files/setupapihost-arm64.dll");
   let resource = match id {
     ResId::Cat => WINTUN_CAT,
     ResId::Sys => WINTUN_SYS,
     ResId::Inf => WINTUN_INF,
+    ResId::SetupApiHostAmd64 => WINTUN_SETUP_API_HOST_AMD64,
+    ResId::SetupApiHostArm64 => WINTUN_SETUP_API_HOST_ARM64,
   };
   std::fs::File::create(dst)
     .as_ref()
@@ -44,16 +46,11 @@ pub fn copy_to_file(dst: &Path, id: ResId) -> Win32Result<()> {
   Ok(())
 }
 
-pub fn create_temp_dir() -> Win32Result<PathBuf> {
-  let mut windows_directory = [0 as WCHAR; MAX_PATH];
-  let result = unsafe { GetWindowsDirectoryW(windows_directory.as_mut_ptr(), MAX_PATH as u32) };
-  if result == 0 {
-    let err = last_error!("Failed to get Windows folder");
-    return Err(err.into());
-  }
-  let windows_dir = unsafe { WideCStr::from_ptr(windows_directory.as_ptr()) };
-  let windows_dir = windows_dir.to_os_string();
-  let windows_dir_path = Path::new(&windows_dir);
+pub fn create_temp_dir() -> std::io::Result<PathBuf> {
+  let windows_dir_path = match get_windows_dir_path() {
+    Ok(res) => res,
+    Err(err) => return Err(error!(err, "Failed to get Windows folder")),
+  };
   let temp_path = windows_dir_path.join("Temp");
   const HEX: [char; 16] = b"0123456789ABCDEF".map(|c| c as char);
   let hex_dist = rand::distributions::Slice::new(&HEX).unwrap();
