@@ -65,6 +65,7 @@ use crate::logger::{error, info, last_error, log, warn};
 use crate::namespace::SystemNamedMutexLock;
 use crate::nci::SetConnectionName;
 use crate::registry::{RegKey, RegistryQueryDWORD, RegistryQueryString};
+use crate::rundll32::{remove_instance, enable_instance};
 use crate::winapi_ext::devquery::{
   DevCloseObjectQuery, DevCreateObjectQuery, _DEV_OBJECT_TYPE_DevObjectTypeDeviceInterface,
   _DEV_QUERY_FLAGS_DevQueryFlagUpdateResults, _DEV_QUERY_RESULT_ACTION_DevQueryResultAdd,
@@ -613,9 +614,9 @@ pub(crate) fn AdapterRemoveInstance(
   DevInfoData: *mut SP_DEVINFO_DATA,
 ) -> std::io::Result<()> {
   if unsafe { get_system_params().NativeMachine } != IMAGE_FILE_PROCESS {
-    return RemoveInstanceViaRundll32(DevInfo, DevInfoData);
+    return remove_instance(DevInfo, DevInfoData);
   }
-  let RemoveDeviceParams = SP_REMOVEDEVICE_PARAMS {
+  let mut RemoveDeviceParams = SP_REMOVEDEVICE_PARAMS {
     ClassInstallHeader: SP_CLASSINSTALL_HEADER {
       cbSize: std::mem::size_of::<SP_CLASSINSTALL_HEADER>() as u32,
       InstallFunction: DIF_REMOVE,
@@ -645,9 +646,9 @@ pub(crate) fn AdapterEnableInstance(
   DevInfoData: *mut SP_DEVINFO_DATA,
 ) -> std::io::Result<()> {
   if unsafe { get_system_params().NativeMachine } != IMAGE_FILE_PROCESS {
-    return EnableInstanceViaRundll32(DevInfo, DevInfoData);
+    return enable_instance(DevInfo, DevInfoData);
   }
-  let Params = SP_PROPCHANGE_PARAMS {
+  let mut Params = SP_PROPCHANGE_PARAMS {
     ClassInstallHeader: SP_CLASSINSTALL_HEADER {
       cbSize: std::mem::size_of::<SP_CLASSINSTALL_HEADER>() as u32,
       InstallFunction: DIF_PROPERTYCHANGE,
@@ -679,9 +680,9 @@ pub(crate) fn AdapterDisableInstance(
   DevInfoData: *mut SP_DEVINFO_DATA,
 ) -> std::io::Result<()> {
   if unsafe { get_system_params().NativeMachine } != IMAGE_FILE_PROCESS {
-    return EnableInstanceViaRundll32(DevInfo, DevInfoData);
+    return enable_instance(DevInfo, DevInfoData);
   }
-  let Params = SP_PROPCHANGE_PARAMS {
+  let mut Params = SP_PROPCHANGE_PARAMS {
     ClassInstallHeader: SP_CLASSINSTALL_HEADER {
       cbSize: std::mem::size_of::<SP_CLASSINSTALL_HEADER>() as u32,
       InstallFunction: DIF_PROPERTYCHANGE,
@@ -863,12 +864,12 @@ fn RenameByNetGUID(Guid: GUID, Name: &WideCStr) -> std::io::Result<()> {
     )
   };
   if DevInfo == INVALID_HANDLE_VALUE {
-    return Win32Error::get_last_error().to_result();
+    return Err(std::io::Error::last_os_error());
   }
   unsafe_defer! { destroyDevInfoList <-
     SetupDiDestroyDeviceInfoList(DevInfo) ;
   };
-  let DevInfoData = SP_DEVINFO_DATA {
+  let mut DevInfoData = SP_DEVINFO_DATA {
     cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as DWORD,
     ..unsafe { InitZeroed::init_zeroed() }
   };
@@ -895,12 +896,12 @@ fn RenameByNetGUID(Guid: GUID, Name: &WideCStr) -> std::io::Result<()> {
     }
     let Key = RegKey::from_raw(Key);
     let Ok(ValueStr) = RegistryQueryString(&Key, widecstr!("NetCfgInstanceid"), true) else {continue;};
-    let Guid2 = unsafe { GUID::init_zeroed() };
+    let mut Guid2 = unsafe { GUID::init_zeroed() };
     let HRet = unsafe { CLSIDFromString(ValueStr.as_ptr(), Guid2.get_mut_ptr()) };
     if FAILED(HRet) || guid_eq(Guid, Guid2) {
       continue;
     }
-    let NameSize = (Name.len() + 1) * std::mem::size_of::<WCHAR>() as u32;
+    let NameSize = Name.capacity();
     let result = unsafe {
       SetupDiSetDevicePropertyW(
         DevInfo,
@@ -913,7 +914,7 @@ fn RenameByNetGUID(Guid: GUID, Name: &WideCStr) -> std::io::Result<()> {
       )
     };
     if result == FALSE {
-      return Win32Error::get_last_error().to_result();
+      return Err(std::io::Error::last_os_error());
     }
     return Ok(());
   }
@@ -950,17 +951,17 @@ pub fn ConvertInterfaceAliasToGuid(Name: &WideCStr) -> std::io::Result<GUID> {
 pub fn NciSetAdapterName(Guid: GUID, Name: &WideCStr) -> std::io::Result<WideCString> {
   const MAX_SUFFIX: u32 = 1000;
   if Name.len_usize() >= MAX_ADAPTER_NAME {
-    let err = Win32Error::new(ERROR_BUFFER_OVERFLOW);
+    let err = std::io::Error::from_raw_os_error(ERROR_BUFFER_OVERFLOW as i32);
     return Err(err);
   }
   let mut avaliable_name = Name.to_owned();
   for i in 0..MAX_SUFFIX {
     match SetConnectionName(Guid, avaliable_name.as_ref()) {
       Ok(()) => return Ok(avaliable_name),
-      Err(err) if err.code() == ERROR_DUP_NAME => {}
+      Err(err) if err.raw_os_error().unwrap() == ERROR_DUP_NAME as i32 => {}
       Err(err) => return Err(err),
     };
     todo!("Trying another name is not implemented")
   }
-  Err(Win32Error::new(ERROR_DUP_NAME))
+  Err(std::io::Error::from_raw_os_error(ERROR_DUP_NAME as i32))
 }

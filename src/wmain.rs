@@ -23,7 +23,7 @@ use winapi::{
 
 use crate::{
   logger::last_error, namespace::NamespaceInit, ntdll::RtlGetNtVersionNumbers,
-  winapi_ext::devquery::USHORT,
+  winapi_ext::devquery::USHORT, adapter_win7::cleanup_lagacy_devices,
 };
 
 struct SystemParams {
@@ -55,7 +55,7 @@ pub unsafe fn get_system_params<'a>() -> &'a mut SystemParams {
     unsafe {
       NamespaceInit();
     }
-    AdapterCleanupLagacyDevices();
+    cleanup_lagacy_devices();
     *params = SystemParams {
       SecurityAttributes,
       IsLocalSystem,

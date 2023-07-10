@@ -2,7 +2,7 @@ use cutils::{
   check_handle, defer,
   inspection::{CastToMutVoidPtrExt, GetPtrExt, InitZeroed},
   strings::{WideCStr, WideCString},
-  unsafe_defer, wide_array, widecstr, widecstring,
+  unsafe_defer, wide_array, widecstr, widecstring, csizeof,
 };
 use get_last_error::Win32Error;
 use winapi::{
@@ -67,8 +67,8 @@ fn DisableAllOurAdapters(
     };
     let result = unsafe { SetupDiEnumDeviceInfo(DevInfo, EnumIndex, device.get_mut_ptr()) };
     if result == FALSE {
-      let error = Win32Error::get_last_error();
-      if error.code() == ERROR_NO_MORE_ITEMS {
+      let error = std::io::Error::last_os_error();
+      if error.raw_os_error().unwrap() == ERROR_NO_MORE_ITEMS as i32 {
         break;
       }
       if overall_result.is_ok() {
@@ -113,7 +113,7 @@ fn DisableAllOurAdapters(
       name.display()
     );
     if let Err(err) = AdapterDisableInstance(DevInfo, device.get_mut_ptr()) {
-      error!(err, "Failed to disable adapter \"{}\"", name.display());
+      let err = error!(err, "Failed to disable adapter \"{}\"", name.display());
       if overall_result.is_ok() {
         overall_result = Err(err);
       }
@@ -149,7 +149,7 @@ fn EnableAllOurAdapters(
       .ok_or(Win32Error::new(ERROR_INVALID_DATA))?;
     info!("Enabling adapter: \"{}\"", name.display());
     if let Err(err) = AdapterEnableInstance(DevInfo, device.get_mut_ptr()) {
-      error!(err, "Failed to enable adapter \"{}\"", name.display());
+      let err = error!(err, "Failed to enable adapter \"{}\"", name.display());
       if overall_result.is_ok() {
         overall_result = Err(err);
       }
@@ -238,7 +238,7 @@ fn VersionOfFile(filename: &WideCStr) -> std::io::Result<DWORD> {
       "Determined version of {}, but was v0.0, so returning failure",
       filename.display()
     );
-    return Err(Win32Error::new(ERROR_VERSION_PARSE_ERROR));
+    return Err(std::io::Error::from_raw_os_error(ERROR_VERSION_PARSE_ERROR as i32));
   }
   Ok(version)
 }
@@ -288,7 +288,7 @@ fn MaybeGetRunningDriverVersion(ReturnOneIfRunningInsteadOfVersion: bool) -> std
       return VersionOfFile(filepath.as_ref());
     }
   }
-  Err(Win32Error::new(ERROR_FILE_NOT_FOUND))
+  Err(std::io::Error::from_raw_os_error(ERROR_FILE_NOT_FOUND as i32))
 }
 
 pub fn WintunGetRunningDriverVersion() -> std::io::Result<DWORD> {
@@ -376,17 +376,20 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
   if result == FALSE {
     return Err(last_error!("Failed building adapter driver info list"));
   }
-  unsafe_defer! { cleanupDriverInfoList <- SetupDiDestroyDriverInfoList(DevInfo, DevInfoData.get_mut_ptr(), SPDIT_COMPATDRIVER); };
+  let DevInfoDataPtr = DevInfoData.get_mut_ptr();
+  unsafe_defer! { cleanupDriverInfoList <- SetupDiDestroyDriverInfoList(DevInfo, DevInfoDataPtr, SPDIT_COMPATDRIVER); };
   let mut driver_date = unsafe { FILETIME::init_zeroed() };
   let mut driver_version = 0;
   let mut dev_info_existing_adapters = INVALID_HANDLE_VALUE;
+  let dev_info_existing_adapters_ptr = dev_info_existing_adapters.get_mut_ptr();
   let mut existing_adapters = std::collections::LinkedList::new();
-  defer! { cleanupExistingAdapters <-
-    DriverInstallDeferredCleanup(dev_info_existing_adapters, &mut existing_adapters);
+  let existing_adapters_ptr = existing_adapters.get_mut_ptr();
+  unsafe_defer! { cleanupExistingAdapters <-
+    DriverInstallDeferredCleanup(*dev_info_existing_adapters_ptr, &mut *existing_adapters_ptr);
   };
   for EnumIndex in 0.. {
     let mut DrvInfoData = SP_DRVINFO_DATA_W {
-      cbSize: std::mem::size_of::<SP_DRVINFO_DATA_W>() as DWORD,
+      cbSize: csizeof!(SP_DRVINFO_DATA_W),
       ..unsafe { std::mem::zeroed() }
     };
     let result = unsafe {
@@ -503,7 +506,7 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
   );
   let random_temp_sub_dir = create_temp_dir()?;
   defer! { cleanupDirectory <-
-    if let Err(err) = std::fs::remove_dir_all(random_temp_sub_dir) {
+    if let Err(err) = std::fs::remove_dir_all(&random_temp_sub_dir) {
       error!(
         Win32Error::new(err.raw_os_error().unwrap() as u32),
         "Failed to remove temp directory"
@@ -599,8 +602,9 @@ pub fn WintunDeleteDriver() -> std::io::Result<()> {
   if result == FALSE {
     return Err(last_error!("Failed building adapter driver info list"));
   }
+  let dev_info_data_ptr = dev_info_data.get_mut_ptr();
   unsafe_defer! { cleanupDriverInfoList <-
-    SetupDiDestroyDriverInfoList(dev_info, dev_info_data.get_mut_ptr(), SPDIT_COMPATDRIVER);
+    SetupDiDestroyDriverInfoList(dev_info, dev_info_data_ptr, SPDIT_COMPATDRIVER);
   };
   for EnumIndex in 0.. {
     let mut drv_info_data = SP_DRVINFO_DATA_W {
@@ -610,7 +614,7 @@ pub fn WintunDeleteDriver() -> std::io::Result<()> {
     let result = unsafe {
       SetupDiEnumDriverInfoW(
         dev_info,
-        dev_info_data.get_mut_ptr(),
+        dev_info_data_ptr,
         SPDIT_COMPATDRIVER,
         EnumIndex,
         drv_info_data.get_mut_ptr(),

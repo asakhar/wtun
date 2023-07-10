@@ -76,8 +76,11 @@ impl Logger {
       logger: std::sync::RwLock::new(NopLogger),
     }
   }
-  pub fn log(&self, level: LogLevel, log_line: core::fmt::Arguments) {
+  pub fn log_with_time(&self, level: LogLevel, time: std::time::SystemTime, log_line: core::fmt::Arguments) {
     self.logger.read().ignore()(level, SystemTime::now(), format_args!("{}", log_line));
+  }
+  pub fn log(&self, level: LogLevel, log_line: core::fmt::Arguments) {
+    self.log_with_time(level, std::time::SystemTime::now(), log_line);
   }
   pub fn error(&self, Error: impl IntoError, Prefix: core::fmt::Arguments) -> std::io::Error {
     let error = Error.into_error();
@@ -85,8 +88,7 @@ impl Logger {
       Some(err) => format_args!("(Code 0x{err:08X})"),
       None => format_args!(""),
     };
-    let msg = format_args!("{}: {} {}", Prefix, error, code);
-    self.logger.read().ignore()(LogLevel::Error, SystemTime::now(), msg);
+    self.logger.read().ignore()(LogLevel::Error, SystemTime::now(), format_args!("{}: {} {}", Prefix, error, code));
     error
   }
 }
@@ -100,8 +102,7 @@ mod macro_impl {
   macro_rules! log {
     ($level:expr, $fmt:literal, $($args:expr),*) => {
       {
-        let log_line = format_args!($fmt, $($args),*);
-        $crate::logger::WINTUN_LOGGER.log($level, log_line)
+        $crate::logger::WINTUN_LOGGER.log($level, format_args!($fmt, $($args),*))
       }
     };
     ($level:expr, $fmt:literal) => {
@@ -114,8 +115,7 @@ mod macro_impl {
   macro_rules! info {
     ($fmt:literal, $($args:expr),*) => {
       {
-        let log_line = format_args!($fmt, $($args),*);
-        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Info, log_line)
+        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Info, format_args!($fmt, $($args),*))
       }
     };
     ($fmt:literal) => {
@@ -128,8 +128,7 @@ mod macro_impl {
   macro_rules! warning {
     ($fmt:literal, $($args:expr),*) => {
       {
-        let log_line = format_args!($fmt, $($args),*);
-        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Warning, &log_line)
+        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Warning, format_args!($fmt, $($args),*))
       }
     };
     ($fmt:literal) => {
@@ -142,8 +141,7 @@ mod macro_impl {
   macro_rules! error {
     ($error:expr, $fmt:literal, $($args:expr),*) => {
       {
-        let log_line = format_args!($fmt, $($args),*);
-        $crate::logger::WINTUN_LOGGER.error($error, log_line)
+        $crate::logger::WINTUN_LOGGER.error($error, format_args!($fmt, $($args),*))
       }
     };
     ($error:expr, $fmt:literal) => {

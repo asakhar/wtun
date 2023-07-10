@@ -107,7 +107,7 @@ pub fn RegistryGetString(
   value_type: RegistryValueType,
 ) -> std::io::Result<WideCString> {
   if value.len() & 1 != 0 {
-    return Err(Win32Error::new(ERROR_INVALID_DATA));
+    return Err(std::io::Error::from_raw_os_error(ERROR_INVALID_DATA as i32));
   }
   let value: Vec<u16> = value.chunks_exact(2).map(|chunk| u16::from_ne_bytes(chunk.try_into().unwrap())).collect();
   let value = WideCString::from(value);
@@ -130,8 +130,8 @@ pub fn RegistryGetString(
         printable
       ));
     }
-    if Result as usize > value.len_hint_usize() {
-      let amount = Result - value.len();
+    if Result > value.len_dword() {
+      let amount = Result - value.len_dword();
       expanded.reserve(amount);
       continue;
     }
@@ -222,7 +222,7 @@ pub fn RegistryQueryDWORD(
     )
   };
   if LastError != ERROR_SUCCESS as i32 {
-    let err = Win32Error::new(LastError as u32);
+    let err = std::io::Error::from_raw_os_error(LastError);
     if Log {
       let RegPath = LoggerGetRegistryKeyPath(Key);
       return Err(error!(
@@ -283,7 +283,7 @@ fn RegistryQuery(
       return Ok(p.into_boxed_slice());
     }
     if LastError as u32 != ERROR_MORE_DATA {
-      let err = Win32Error::new(LastError as u32);
+      let err = std::io::Error::from_raw_os_error(LastError);
       if Log {
         let RegPath = LoggerGetRegistryKeyPath(Key);
         return Err(error!(
