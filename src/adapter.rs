@@ -85,13 +85,7 @@ use crate::winapi_ext::swdevice::{
   _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesSilentInstall, HSWDEVICE, SW_DEVICE_CREATE_INFO,
 };
 use crate::winapi_ext::winternl::RtlNtStatusToDosError;
-// use crate::winapi_ext::swdevice::{
-//   _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesDriverRequired,
-//   _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesSilentInstall, SW_DEVICE_CREATE_INFO,
-// };
 use crate::wmain::{get_system_params, IMAGE_FILE_PROCESS};
-// use crate::winapi_ext::devquery::{HDEVQUERY, _DEV_QUERY_RESULT_ACTION_DevQueryResultAdd, _DEV_QUERY_RESULT_ACTION_DevQueryResultUpdate, DEVPROP_FILTER_EXPRESSION, _DEVPROP_OPERATOR_DEVPROP_OPERATOR_EQUALS_IGNORE_CASE};
-// use crate::winapi_ext::devquerydef::{DEV_QUERY_RESULT_ACTION_DATA, _DEV_QUERY_STATE_DevQueryStateAborted};
 
 pub(crate) const WINTUN_HWID: &WideCStr = widecstr!("Wintun");
 macro_rules! WINTUN_ENUMERATOR {
@@ -104,7 +98,6 @@ macro_rules! WINTUN_ENUMERATOR {
   }
 }
 pub(crate) use WINTUN_ENUMERATOR;
-// pub(crate) const WINTUN_ENUMERATOR: &WideCStr = widecstr!(r"ROOT\Wintun");
 
 pub(crate) const DEVPKEY_Wintun_Name: DEVPROPKEY = DEVPROPKEY {
   fmtid: DEVPROPGUID {
@@ -1089,7 +1082,7 @@ fn PopulateAdapterData(Adapter: &mut Adapter) -> std::io::Result<()> {
   Ok(())
 }
 
-unsafe extern "system" fn DoOrphanedDeviceCleanup(Ctx: LPVOID) -> DWORD {
+unsafe extern "system" fn DoOrphanedDeviceCleanup(_Ctx: LPVOID) -> DWORD {
   AdapterCleanupOrphanedDevices();
   OrphanThreadIsWorking.store(false, std::sync::atomic::Ordering::Relaxed);
   return 0;
@@ -1305,8 +1298,8 @@ pub fn NciSetAdapterName(Guid: GUID, Name: &WideCStr) -> std::io::Result<WideCSt
     let err = std::io::Error::from_raw_os_error(ERROR_BUFFER_OVERFLOW as i32);
     return Err(err);
   }
-  let mut avaliable_name = Name.to_owned();
-  for i in 0..MAX_SUFFIX {
+  let avaliable_name = Name.to_owned();
+  for _i in 0..MAX_SUFFIX {
     match SetConnectionName(Guid, avaliable_name.as_ref()) {
       Ok(()) => return Ok(avaliable_name),
       Err(err) if err.raw_os_error().unwrap() == ERROR_DUP_NAME as i32 => {}
