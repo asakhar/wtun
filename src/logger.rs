@@ -21,6 +21,7 @@ use crate::{
 /**
  * Determines the level of logging, passed to WINTUN_LOGGER_CALLBACK.
  */
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
   Info,
   Warning,
@@ -77,18 +78,14 @@ impl Logger {
     }
   }
   pub fn log_with_time(&self, level: LogLevel, time: std::time::SystemTime, log_line: core::fmt::Arguments) {
-    self.logger.read().ignore()(level, SystemTime::now(), format_args!("{}", log_line));
+    self.logger.read().ignore()(level, time, format_args!("{}", log_line));
   }
   pub fn log(&self, level: LogLevel, log_line: core::fmt::Arguments) {
     self.log_with_time(level, std::time::SystemTime::now(), log_line);
   }
   pub fn error(&self, Error: impl IntoError, Prefix: core::fmt::Arguments) -> std::io::Error {
     let error = Error.into_error();
-    let code = match error.raw_os_error() {
-      Some(err) => format_args!("(Code 0x{err:08X})"),
-      None => format_args!(""),
-    };
-    self.logger.read().ignore()(LogLevel::Error, SystemTime::now(), format_args!("{}: {} {}", Prefix, error, code));
+    self.logger.read().ignore()(LogLevel::Error, SystemTime::now(), format_args!("{}: {} (Code 0x{:08X})", Prefix, error, error.raw_os_error().unwrap_or(0)));
     error
   }
 }
@@ -102,12 +99,12 @@ mod macro_impl {
   macro_rules! log {
     ($level:expr, $fmt:literal, $($args:expr),*) => {
       {
-        $crate::logger::WINTUN_LOGGER.log($level, format_args!($fmt, $($args),*))
+        $crate::logger::WINTUN_LOGGER.log($level, format_args!(concat!(file!(), ":", line!(), " => ", $fmt), $($args),*))
       }
     };
     ($level:expr, $fmt:literal) => {
       {
-        $crate::logger::WINTUN_LOGGER.log($level, format_args!($fmt))
+        $crate::logger::WINTUN_LOGGER.log($level, format_args!(concat!(file!(), ":", line!(), " => ", $fmt)))
       }
     };
   }
@@ -115,12 +112,12 @@ mod macro_impl {
   macro_rules! info {
     ($fmt:literal, $($args:expr),*) => {
       {
-        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Info, format_args!($fmt, $($args),*))
+        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Info, format_args!(concat!(file!(), ":", line!(), " => ", $fmt), $($args),*))
       }
     };
     ($fmt:literal) => {
       {
-        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Info, format_args!($fmt))
+        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Info, format_args!(concat!(file!(), ":", line!(), " => ", $fmt)))
       }
     };
   }
@@ -128,12 +125,12 @@ mod macro_impl {
   macro_rules! warning {
     ($fmt:literal, $($args:expr),*) => {
       {
-        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Warning, format_args!($fmt, $($args),*))
+        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Warning, format_args!(concat!(file!(), ":", line!(), " => ", $fmt), $($args),*))
       }
     };
     ($fmt:literal) => {
       {
-        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Warning, format_args!($fmt))
+        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Warning, format_args!(concat!(file!(), ":", line!(), " => ", $fmt)))
       }
     };
   }
@@ -141,12 +138,12 @@ mod macro_impl {
   macro_rules! error {
     ($error:expr, $fmt:literal, $($args:expr),*) => {
       {
-        $crate::logger::WINTUN_LOGGER.error($error, format_args!($fmt, $($args),*))
+        $crate::logger::WINTUN_LOGGER.error($error, format_args!(concat!(file!(), ":", line!(), " => ", $fmt), $($args),*))
       }
     };
     ($error:expr, $fmt:literal) => {
       {
-        $crate::logger::WINTUN_LOGGER.error($error, format_args!($fmt))
+        $crate::logger::WINTUN_LOGGER.error($error, format_args!(concat!(file!(), ":", line!(), " => ", $fmt)))
       }
     };
   }
@@ -155,15 +152,17 @@ mod macro_impl {
     ($fmt:literal, $($args:expr),*) => {
       {
         let last_error = std::io::Error::last_os_error();
-        let res = $crate::logger::error!(last_error, $fmt, $($args),*);
-        res
+        $crate::logger::WINTUN_LOGGER.error(last_error, format_args!(concat!(file!(), ":", line!(), " => ", $fmt), $($args),*))
+        // let res = $crate::logger::error!(last_error, $fmt, $($args),*);
+        // res
       }
     };
     ($fmt:literal) => {
       {
         let last_error = std::io::Error::last_os_error();
-        let res = $crate::logger::error!(last_error, $fmt);
-        res
+        $crate::logger::WINTUN_LOGGER.error(last_error, format_args!(concat!(file!(), ":", line!(), " => ", $fmt)))
+        // let res = $crate::logger::error!(last_error, $fmt);
+        // res
       }
     };
   }

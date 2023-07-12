@@ -46,11 +46,11 @@ pub(crate) fn create_instance(
   instance_id: &mut WideCStr,
 ) -> std::io::Result<StaticWideCStr<MAX_DEVICE_ID_LEN>> {
   info!("Spawning native process to create instance");
-  let response = match execute_rundll32("CreateInstanceWin7", std::iter::empty()) {
+  let response = match execute_rundll32("CreateInstanceWin7", &[]) {
     Ok(res) => res,
     Err(err) => return Err(error!(err, "Error executing worker process")),
   };
-  let error_bytes: [u8; 4] = response.try_into().ok().ok_or(error!(
+  let error_bytes: [u8; 4] = response.as_slice().try_into().ok().ok_or(error!(
     ERROR_INVALID_PARAMETER,
     "Incomplete response: {:?}", response
   ))?;
@@ -66,7 +66,7 @@ pub(crate) fn create_instance(
 }
 fn execute_rundll32<'a>(
   function: &str,
-  arguments: impl Iterator<Item = &'a str>,
+  arguments: &[&str],
 ) -> std::io::Result<Vec<u8>> {
   let windows_dir_path = match get_windows_dir_path() {
     Ok(res) => res,
@@ -78,7 +78,7 @@ fn execute_rundll32<'a>(
     Err(err) => return Err(error!(err, "Failed to create temporary folder")),
   };
   defer! { cleanupDirectory <-
-    drop(std::fs::remove_dir_all(random_temp_subdir));
+    drop(std::fs::remove_dir_all(&random_temp_subdir));
   };
   let dll_path = random_temp_subdir.join("setupapihost.dll");
   let native_machine = unsafe { get_system_params().NativeMachine };
@@ -93,7 +93,7 @@ fn execute_rundll32<'a>(
     }
   };
   defer! { cleanupDelete <-
-    drop(std::fs::remove_file(dll_path));
+    drop(std::fs::remove_file(&dll_path));
   };
   if let Err(err) = resource::copy_to_file(&dll_path, resource_id) {
     return Err(error!(
@@ -103,11 +103,12 @@ fn execute_rundll32<'a>(
       dll_path.display()
     ));
   }
+  let arg = format!("{},{}", dll_path.display(), function);
+  let args = std::iter::once(arg.as_str())
+  .chain(arguments.iter().copied());
   let mut proc = match std::process::Command::new(rundll32_path)
     .args(
-      [format!("{},{}", dll_path.display(), function).as_str()]
-        .into_iter()
-        .chain(arguments),
+      args,
     )
     .stderr(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
@@ -131,6 +132,7 @@ fn execute_rundll32<'a>(
       b'+' => crate::logger::LogLevel::Info,
       b'-' => crate::logger::LogLevel::Warning,
       b'!' => crate::logger::LogLevel::Error,
+      _ => return Err(std::io::ErrorKind::InvalidData.into())
     };
     let mut buf = [0; 8];
     stderr.read_exact(&mut buf)?;
@@ -184,7 +186,7 @@ fn invoke_class_installer(
     return Err(last_error!("Failed to get adapter instance ID"));
   }
   let instance_id = instance_id.display().to_string();
-  let response = match execute_rundll32(function, std::iter::once(instance_id.as_str())) {
+  let response = match execute_rundll32(function, &[instance_id.as_str()]) {
     Ok(res) => res,
     Err(err) => {
       return Err(error!(
@@ -193,7 +195,7 @@ fn invoke_class_installer(
       ))
     }
   };
-  let error_bytes: [u8; 4] = response.try_into().ok().ok_or(error!(
+  let error_bytes: [u8; 4] = response.as_slice().try_into().ok().ok_or(error!(
     ERROR_INVALID_PARAMETER,
     "Incomplete response: {:?}", response
   ))?;

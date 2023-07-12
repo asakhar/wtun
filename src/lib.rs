@@ -13,3 +13,6 @@ mod driver;
 mod wintun_inf;
 mod resource;
 mod rundll32;
+
+pub use adapter::Adapter;
+pub use logger::{set_logger, LogLevel};

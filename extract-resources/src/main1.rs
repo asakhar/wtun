@@ -6,6 +6,7 @@ use winapi::shared::basetsd::DWORD64;
 use winapi::shared::guiddef::GUID;
 use winapi::shared::minwindef::BOOL;
 use winapi::shared::ntdef::LPCWSTR;
+
 type ResourceCopyToFileFunc = unsafe extern "C" fn(dst: LPCWSTR, name: LPCWSTR) -> BOOL;
 type WintunCreateAdapterFunc =
   unsafe extern "C" fn(name: LPCWSTR, tun: LPCWSTR, guid: *const GUID) -> BOOL;
@@ -45,15 +46,19 @@ fn main() {
     unsafe { lib.get(b"WintunCreateAdapter\0") }.unwrap();
   let wintun_set_logger: Symbol<WintunSetLoggerFunc> =
     unsafe { lib.get(b"WintunSetLogger\0") }.unwrap();
-  println!("my id is: {}", std::process::id());
-  println!("my id is: {}", std::process::id());
   unsafe {
     wintun_set_logger(Some(logger));
   }
-  let wintun_extract_resource = unsafe { ((*wintun_create_adapter) as *const u8).add(0x2ee0) };
-  let wintun_extract_resource: ResourceCopyToFileFunc = unsafe { std::mem::transmute(wintun_extract_resource) };
+  let adapter = unsafe { wintun_create_adapter(
+    widecstr!("test").as_ptr(),
+    widecstr!("test").as_ptr(),
+    std::ptr::null_mut(),
+  ) };
+  assert_ne!(adapter, 0);
+  // let wintun_extract_resource = unsafe { ((*wintun_create_adapter) as *const u8).add(0x2ee0) };
+  // let wintun_extract_resource: ResourceCopyToFileFunc = unsafe { std::mem::transmute(wintun_extract_resource) };
 
-  for (output, resource) in outputs.iter().zip(resources) {
-    unsafe { wintun_extract_resource(output.as_ptr(), resource.as_ptr()); }
-  }
+  // for (output, resource) in outputs.iter().zip(resources) {
+  //   unsafe { wintun_extract_resource(output.as_ptr(), resource.as_ptr()); }
+  // }
 }

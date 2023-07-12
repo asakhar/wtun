@@ -1,10 +1,9 @@
 use cutils::{
   check_handle, csizeof,
-  deferred::Deferred,
   files::WindowsFile,
   inspection::{GetPtrExt, InitZeroed},
   static_widecstr,
-  strings::{StaticWideCStr, U16CStr, WideCStr},
+  strings::{StaticWideCStr, WideCStr},
   unsafe_defer, wide_array, widecstr,
 };
 use get_last_error::Win32Error;
@@ -25,7 +24,7 @@ use winapi::{
   },
   um::{
     cfgmgr32::{CM_Get_DevNode_Status, CR_SUCCESS},
-    handleapi::{CloseHandle, INVALID_HANDLE_VALUE},
+    handleapi::CloseHandle,
     ipexport::MAX_ADAPTER_NAME,
     processthreadsapi::{GetCurrentProcess, GetCurrentProcessId, GetProcessTimes, OpenProcess},
     setupapi::{
@@ -48,7 +47,7 @@ use winapi::{
 
 use crate::{
   adapter::{
-    AdapterGetDeviceObjectFileName, AdapterRemoveInstance, DEVPKEY_Wintun_Name, WINTUN_ADAPTER,
+    Adapter, AdapterGetDeviceObjectFileName, AdapterRemoveInstance, DEVPKEY_Wintun_Name,
     WINTUN_ENUMERATOR, WINTUN_HWID,
   },
   logger::{error, info, last_error, IntoError},
@@ -146,11 +145,11 @@ pub fn wait_for_interface_win7(
 }
 
 pub fn create_adapter_win7(
-  adapter: &mut WINTUN_ADAPTER,
+  adapter: &mut Adapter,
   name: &WideCStr,
   tunnel_type: &WideCStr,
 ) -> std::io::Result<()> {
-  let mut dev_info = unsafe {
+  let dev_info = unsafe {
     SetupDiCreateDeviceInfoListExW(
       GUID_DEVCLASS_NET.get_const_ptr(),
       std::ptr::null_mut(),
@@ -199,7 +198,7 @@ pub fn create_adapter_win7(
     SetupDiDestroyDriverInfoList(dev_info, dev_info_data_ptr, SPDIT_COMPATDRIVER);
   };
   unsafe_defer! { cleanupDevice <- move
-    AdapterRemoveInstance(dev_info, dev_info_data_ptr);
+    drop(AdapterRemoveInstance(dev_info, dev_info_data_ptr));
   };
   let mut OwningProcess = unsafe {
     OWNING_PROCESS {
@@ -424,7 +423,7 @@ fn init_instance_not_wow64(
     last_error!("Failed to install adapter interfaces");
   }
   unsafe_defer! { cleanupDevice <- move
-    AdapterRemoveInstance(dev_info, dev_info_data_ptr);
+    drop(AdapterRemoveInstance(dev_info, dev_info_data_ptr));
   };
   if FALSE == unsafe { SetupDiCallClassInstaller(DIF_INSTALLDEVICE, dev_info, dev_info_data_ptr) } {
     return Err(last_error!("Failed to install adapter device"));
@@ -434,7 +433,7 @@ fn init_instance_not_wow64(
   Ok(())
 }
 
-pub fn create_adapter_post_win7(adapter: &mut WINTUN_ADAPTER, tunnel_type: &WideCStr) {
+pub fn create_adapter_post_win7(adapter: &mut Adapter, tunnel_type: &WideCStr) {
   unsafe {
     SetupDiSetDeviceRegistryPropertyW(
       adapter.DevInfo,
@@ -613,7 +612,7 @@ pub fn cleanup_lagacy_devices() {
     }
     for s in HardwareIDs.iter_strs() {
       if s == WINTUN_HWID {
-        AdapterRemoveInstance(dev_info, dev_info_data.get_mut_ptr());
+        drop(AdapterRemoveInstance(dev_info, dev_info_data.get_mut_ptr()));
         break;
       }
     }

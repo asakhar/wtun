@@ -1,29 +1,33 @@
+use std::ptr::null_mut;
 use std::sync::atomic::AtomicBool;
 
 use cutils::ignore::ResultIgnoreExt;
 use cutils::inspection::{CastToMutVoidPtrExt, GetPtrExt, InitZeroed};
 use cutils::strings::{StaticWideCStr, WideCStr, WideCString};
 use cutils::{
-  check_handle, csizeof, defer, guid_eq, unsafe_defer, wide_array, widecstr, GetPvoidExt,
-  Win32ErrorFromCrExt, Win32ErrorToResultExt, static_widecstr,
+  check_handle, csizeof, defer, guid_eq, static_widecstr, unsafe_defer, wide_array, widecstr,
+  Win32ErrorFromCrExt, Win32ErrorToResultExt,
 };
 use get_last_error::Win32Error;
+use winapi::shared::basetsd::INT32;
 use winapi::shared::cfg::DN_HAS_PROBLEM;
 use winapi::shared::devguid::GUID_DEVCLASS_NET;
 use winapi::shared::devpkey::{
-  DEVPKEY_DeviceInterface_ClassGuid, DEVPKEY_DeviceInterface_Enabled, DEVPKEY_Device_InstanceId,
+  DEVPKEY_DeviceInterface_ClassGuid, DEVPKEY_DeviceInterface_Enabled, DEVPKEY_Device_ClassGuid,
+  DEVPKEY_Device_DeviceDesc, DEVPKEY_Device_FriendlyName, DEVPKEY_Device_InstanceId,
+  DEVPKEY_Device_ProblemCode, DEVPKEY_Device_ProblemStatus,
 };
 use winapi::shared::devpropdef::{
   DEVPROPCOMPKEY, DEVPROPERTY, DEVPROPGUID, DEVPROPID_FIRST_USABLE, DEVPROPKEY, DEVPROPTYPE,
-  DEVPROP_BOOLEAN, DEVPROP_STORE_SYSTEM, DEVPROP_TRUE, DEVPROP_TYPE_BOOLEAN, DEVPROP_TYPE_GUID,
-  DEVPROP_TYPE_STRING,
+  DEVPROP_STORE_SYSTEM, DEVPROP_TRUE, DEVPROP_TYPE_BOOLEAN, DEVPROP_TYPE_GUID, DEVPROP_TYPE_INT32,
+  DEVPROP_TYPE_NTSTATUS, DEVPROP_TYPE_STRING, DEVPROP_TYPE_UINT32,
 };
 use winapi::shared::guiddef::GUID;
 use winapi::shared::ifdef::NET_LUID;
-use winapi::shared::minwindef::{DWORD, LPVOID};
+use winapi::shared::minwindef::{DWORD, LPVOID, TRUE};
 use winapi::shared::minwindef::{FALSE, HKEY, ULONG};
 use winapi::shared::netioapi::{ConvertInterfaceAliasToLuid, ConvertInterfaceLuidToGuid};
-use winapi::shared::ntdef::{HANDLE, LPCWSTR, PCWSTR};
+use winapi::shared::ntdef::{HANDLE, NTSTATUS, PCWSTR};
 use winapi::shared::winerror::{
   ERROR_BUFFER_OVERFLOW, ERROR_DEVICE_ENUMERATION_ERROR, ERROR_DEVICE_NOT_AVAILABLE,
   ERROR_DUP_NAME, ERROR_GEN_FAILURE, ERROR_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, FAILED,
@@ -33,7 +37,7 @@ use winapi::um::cfgmgr32::{
   CM_Get_DevNode_Status, CM_Get_Device_IDW, CM_Get_Device_Interface_ListW,
   CM_Get_Device_Interface_List_SizeW, CM_Locate_DevNodeW, CM_Open_DevNode_Key,
   RegDisposition_OpenAlways, CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CM_LOCATE_DEVINST_PHANTOM,
-  CM_LOCATE_DEVNODE_NORMAL, CM_REGISTRY_SOFTWARE, CONFIGRET, CR_SUCCESS, DEVINST, DEVINSTID_W,
+  CM_LOCATE_DEVNODE_NORMAL, CM_REGISTRY_SOFTWARE, CR_SUCCESS, DEVINST, DEVINSTID_W,
   MAX_DEVICE_ID_LEN, MAX_GUID_STRING_LEN,
 };
 use winapi::um::combaseapi::{CLSIDFromString, CoCreateGuid, StringFromGUID2};
@@ -41,9 +45,10 @@ use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
 use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
 use winapi::um::ipexport::MAX_ADAPTER_NAME;
 use winapi::um::setupapi::{
-  SetupDiCallClassInstaller, SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo,
-  SetupDiGetClassDevsExW, SetupDiOpenDevRegKey, SetupDiSetClassInstallParamsW,
-  SetupDiSetDevicePropertyW, DICS_DISABLE, DICS_ENABLE, DIF_PROPERTYCHANGE, DIF_REMOVE,
+  SetupDiCallClassInstaller, SetupDiCreateDeviceInfoListExW, SetupDiDestroyDeviceInfoList,
+  SetupDiEnumDeviceInfo, SetupDiGetClassDevsExW, SetupDiGetDeviceInstanceIdW, SetupDiOpenDevRegKey,
+  SetupDiOpenDeviceInfoW, SetupDiSetClassInstallParamsW, SetupDiSetDevicePropertyW, DICS_DISABLE,
+  DICS_ENABLE, DIF_PROPERTYCHANGE, DIF_REMOVE, DIGCF_PRESENT, DIOD_INHERIT_CLASSDRVS,
   DI_REMOVEDEVICE_GLOBAL, ERROR_PNP_REGISTRY_ERROR, SP_CLASSINSTALL_HEADER, SP_PROPCHANGE_PARAMS,
   SP_REMOVEDEVICE_PARAMS,
 };
@@ -59,30 +64,32 @@ use winapi::um::winnt::{
 use winapi::um::winreg::RegSetValueExW;
 use winapi::DEFINE_GUID;
 
-use crate::driver::DriverInstall;
+use crate::adapter_win7::{create_adapter_post_win7, create_adapter_win7};
+use crate::driver::{DriverInstall, DriverInstallDeferredCleanup};
 use crate::logger::LoggerGetRegistryKeyPath;
-use crate::logger::{error, info, last_error, log, warn};
+use crate::logger::{error, info, last_error, log};
 use crate::namespace::SystemNamedMutexLock;
 use crate::nci::SetConnectionName;
 use crate::registry::{RegKey, RegistryQueryDWORD, RegistryQueryString};
-use crate::rundll32::{remove_instance, enable_instance};
+use crate::rundll32::{enable_instance, remove_instance};
 use crate::winapi_ext::devquery::{
   DevCloseObjectQuery, DevCreateObjectQuery, _DEV_OBJECT_TYPE_DevObjectTypeDeviceInterface,
   _DEV_QUERY_FLAGS_DevQueryFlagUpdateResults, _DEV_QUERY_RESULT_ACTION_DevQueryResultAdd,
+  _DEV_QUERY_RESULT_ACTION_DevQueryResultStateChange,
   _DEV_QUERY_RESULT_ACTION_DevQueryResultUpdate, _DEV_QUERY_STATE_DevQueryStateAborted,
   DEVPROP_FILTER_EXPRESSION, DEV_QUERY_RESULT_ACTION_DATA, HDEVQUERY,
   _DEVPROP_OPERATOR_DEVPROP_OPERATOR_EQUALS, _DEVPROP_OPERATOR_DEVPROP_OPERATOR_EQUALS_IGNORE_CASE,
 };
 use crate::winapi_ext::swdevice::{
   SwDeviceClose, SwDeviceCreate, _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesDriverRequired,
-  _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesSilentInstall, HSWDEVICE, PHSWDEVICE,
-  SW_DEVICE_CREATE_INFO,
+  _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesSilentInstall, HSWDEVICE, SW_DEVICE_CREATE_INFO,
 };
+use crate::winapi_ext::winternl::RtlNtStatusToDosError;
 // use crate::winapi_ext::swdevice::{
 //   _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesDriverRequired,
 //   _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesSilentInstall, SW_DEVICE_CREATE_INFO,
 // };
-use crate::wmain::{IMAGE_FILE_PROCESS, get_system_params};
+use crate::wmain::{get_system_params, IMAGE_FILE_PROCESS};
 // use crate::winapi_ext::devquery::{HDEVQUERY, _DEV_QUERY_RESULT_ACTION_DevQueryResultAdd, _DEV_QUERY_RESULT_ACTION_DevQueryResultUpdate, DEVPROP_FILTER_EXPRESSION, _DEVPROP_OPERATOR_DEVPROP_OPERATOR_EQUALS_IGNORE_CASE};
 // use crate::winapi_ext::devquerydef::{DEV_QUERY_RESULT_ACTION_DATA, _DEV_QUERY_STATE_DevQueryStateAborted};
 
@@ -101,7 +108,7 @@ pub(crate) const DEVPKEY_Wintun_Name: DEVPROPKEY = DEVPROPKEY {
 
 static OrphanThreadIsWorking: AtomicBool = AtomicBool::new(false);
 
-pub struct WINTUN_ADAPTER {
+pub struct Adapter {
   pub(crate) SwDevice: HSWDEVICE,
   pub(crate) DevInfo: HDEVINFO,
   pub(crate) DevInfoData: SP_DEVINFO_DATA,
@@ -113,39 +120,89 @@ pub struct WINTUN_ADAPTER {
   pub(crate) IfIndex: DWORD,
 }
 
+impl Adapter {
+  pub fn create(
+    name: &str,
+    tunnel_type: &str,
+    requested_guid: Option<GUID>,
+  ) -> std::io::Result<Adapter> {
+    let name: StaticWideCStr<MAX_ADAPTER_NAME> = cutils::strings::encode(name).ok_or(
+      std::io::Error::new(std::io::ErrorKind::InvalidInput, "Tunnel name is too long"),
+    )?;
+    let tunnel_type: StaticWideCStr<MAX_ADAPTER_NAME> = cutils::strings::encode(tunnel_type)
+      .ok_or(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "Tunnel type is too long",
+      ))?;
+    WintunCreateAdapter(&name, &tunnel_type, requested_guid)
+  }
+  pub fn open(name: &str) -> std::io::Result<Adapter> {
+    let name: StaticWideCStr<MAX_ADAPTER_NAME> = cutils::strings::encode(name).ok_or(
+      std::io::Error::new(std::io::ErrorKind::InvalidInput, "Tunnel name is too long"),
+    )?;
+    WintunOpenAdapter(&name)
+  }
+}
+
+impl Drop for Adapter {
+  fn drop(&mut self) {
+    WintunCloseAdapter(self)
+  }
+}
+
 pub fn WintunCreateAdapter(
-  name: &WideCStr,
-  tunnel_type: &WideCStr,
+  name: &StaticWideCStr<MAX_ADAPTER_NAME>,
+  tunnel_type: &StaticWideCStr<MAX_ADAPTER_NAME>,
   requested_guid: Option<GUID>,
-) -> std::io::Result<WINTUN_ADAPTER> {
-  let mut adapter = WINTUN_ADAPTER {
+) -> std::io::Result<Adapter> {
+  let _system_params = unsafe { get_system_params() };
+  unsafe_defer! { cleanup <-
+    QueueUpOrphanedDeviceCleanupRoutine();
+  };
+  let dev_install_mutex = match SystemNamedMutexLock::take_device_installation_mutex() {
+    Ok(res) => res,
+    Err(err) => return Err(error!(err, "Failed to take device installation mutex")), // cleanup
+  };
+  let (dev_info_existing_adapters, mut existing_adapters) = DriverInstall()?; // cleanupDeviceInstallationMutex
+  info!("Creating adapter");
+  let mut adapter = Adapter {
     InterfaceFilename: Default::default(),
     DevInstanceID: Default::default(),
-    ..unsafe { InitZeroed::init_zeroed() }
+    SwDevice: null_mut(),
+    DevInfo: null_mut(),
+    DevInfoData: unsafe { std::mem::zeroed() },
+    CfgInstanceID: unsafe { std::mem::zeroed() },
+    LuidIndex: 0,
+    IfType: 0,
+    IfIndex: 0,
   };
-  let dev_install_mutex = SystemNamedMutexLock::take_device_installation_mutex()?;
-  let (mut dev_info_existing_adapters, mut existing_adapters) = DriverInstall()?;
-  info!("Creating adapter");
-  let mut root_node = unsafe { DEVINST::init_zeroed() };
+  unsafe_defer! { cleanupDriverInstall <-
+    DriverInstallDeferredCleanup(dev_info_existing_adapters, &mut existing_adapters);
+  };
+  let adapter_ptr = adapter.get_mut_ptr();
+  unsafe_defer! { cleanupAdapter <-
+    WintunCloseAdapter(&mut *adapter_ptr)
+  };
+  let mut root_node: DEVINST = 0;
   let mut root_node_name = StaticWideCStr::<200>::zeroed() /* rasmans.dll uses 200 hard coded instead of calling CM_Get_Device_ID_Size. */;
   let result = unsafe {
     CM_Locate_DevNodeW(
       root_node.get_mut_ptr(),
-      std::ptr::null_mut(),
+      null_mut(),
       CM_LOCATE_DEVNODE_NORMAL,
     )
   };
   if result != CR_SUCCESS {
     return Err(error!(
       Win32Error::from_cr(result, ERROR_GEN_FAILURE),
-      "Failed to get root node name"
+      "Failed to locate root node name"
     ));
   }
   let result = unsafe {
     CM_Get_Device_IDW(
       root_node,
       root_node_name.as_mut_ptr(),
-      root_node_name.len(),
+      root_node_name.capacity(),
       0,
     )
   };
@@ -157,49 +214,110 @@ pub fn WintunCreateAdapter(
   }
   let mut result = S_OK;
   let instance_id = requested_guid.unwrap_or_else(|| {
-    let mut guid = unsafe { GUID::init_zeroed() };
+    let mut guid: GUID = unsafe { std::mem::zeroed() };
     result = unsafe { CoCreateGuid(guid.get_mut_ptr()) };
     guid
   });
   if FAILED(result) {
-    return Err(error!(
-      Win32Error::new(result as DWORD),
-      "Failed to convert GUID"
-    ));
+    return Err(error!(result, "Failed to create GUID"));
   }
   let mut instance_id_str = StaticWideCStr::<MAX_GUID_STRING_LEN>::zeroed();
   let result = unsafe {
     StringFromGUID2(
       instance_id.get_const_ptr(),
       instance_id_str.as_mut_ptr(),
-      instance_id_str.len(),
+      MAX_GUID_STRING_LEN as i32,
     )
   };
   if result == FALSE {
-    return Err(error!(
-      Win32Error::new(ERROR_BUFFER_OVERFLOW),
-      "Failed to convert GUID"
-    ));
+    return Err(last_error!("Failed to convert GUID"));
   }
 
-  let mut create_context = SW_DEVICE_CREATE_CTX::new(adapter.DevInstanceID.as_ref())?;
-  #[cfg(Win7)]
-  {
-    if (!CreateAdapterWin7(Adapter, name, TunnelTypeName)) {
-      LastError = GetLastError();
-      // goto cleanupCreateContext;
+  let mut create_context = SW_DEVICE_CREATE_CTX::new(&mut adapter.DevInstanceID)?;
+  let system_params = unsafe { get_system_params() };
+  if system_params.IsWindows7 {
+    create_adapter_win7(&mut adapter, &name, &tunnel_type)?;
+    // goto skipSwDevice
+  } else {
+    if system_params.IsWindows10 {
+      WintunCreateAdapterStub(
+        instance_id,
+        &instance_id_str,
+        &tunnel_type,
+        &root_node_name,
+        &mut create_context,
+        &mut adapter,
+      )?;
     }
-    // goto skipSwDevice;
+    WintunCreateAdapterSwDevice(
+      &instance_id_str,
+      &name,
+      &tunnel_type,
+      &root_node_name,
+      &mut create_context,
+      &mut adapter,
+    )?;
   }
-  WintunCreateAdapterStub(
-    instance_id,
-    &instance_id_str,
-    tunnel_type,
-    &root_node_name,
-    &mut create_context,
-    &mut adapter,
-  )?;
-  let hwids = static_widecstr!("Wintun"; {WINTUN_HWID.len_usize()+1});
+  adapter.DevInfo = unsafe {
+    SetupDiCreateDeviceInfoListExW(
+      GUID_DEVCLASS_NET.get_const_ptr(),
+      null_mut(),
+      null_mut(),
+      null_mut(),
+    )
+  };
+  if !check_handle(adapter.DevInfo) {
+    adapter.DevInfo = null_mut();
+    return Err(last_error!("Failed to make device list"));
+  }
+  adapter.DevInfoData.cbSize = csizeof!(=adapter.DevInfoData);
+  let res = unsafe {
+    SetupDiOpenDeviceInfoW(
+      adapter.DevInfo,
+      adapter.DevInstanceID.as_ptr(),
+      null_mut(),
+      DIOD_INHERIT_CLASSDRVS,
+      adapter.DevInfoData.get_mut_ptr(),
+    )
+  };
+  if FALSE == res {
+    let last = std::io::Error::last_os_error();
+    unsafe { SetupDiDestroyDeviceInfoList(adapter.DevInfo) };
+    adapter.DevInfo = null_mut();
+    return Err(error!(
+      last,
+      "Failed to open device instance ID {}",
+      adapter.DevInstanceID.display()
+    ));
+  }
+  if let Err(err) = PopulateAdapterData(&mut adapter) {
+    return Err(error!(err, "Failed to populate adapter data"));
+  }
+  if let Err(err) = NciSetAdapterName(adapter.CfgInstanceID, &name) {
+    return Err(error!(
+      err,
+      "Failed to set adapter name \"{}\"",
+      name.display()
+    ));
+  }
+  if system_params.IsWindows7 {
+    create_adapter_post_win7(&mut adapter, &tunnel_type)
+  }
+  cleanupAdapter.forget();
+  cleanupDriverInstall.run();
+  dev_install_mutex.release();
+  cleanup.run();
+  Ok(adapter)
+}
+fn WintunCreateAdapterSwDevice(
+  instance_id_str: &WideCStr,
+  name: &WideCStr,
+  tunnel_type: &WideCStr,
+  root_node_name: &WideCStr,
+  create_context: &mut SW_DEVICE_CREATE_CTX,
+  adapter: &mut Adapter,
+) -> std::io::Result<()> {
+  let hwids = static_widecstr!("Wintun"; 8);
   let create_info = SW_DEVICE_CREATE_INFO {
     cbSize: csizeof!(SW_DEVICE_CREATE_INFO),
     pszInstanceId: instance_id_str.as_ptr(),
@@ -209,9 +327,129 @@ pub fn WintunCreateAdapter(
     pszDeviceDescription: tunnel_type.as_ptr(),
     ..unsafe { core::mem::zeroed() }
   };
-  // --------------------
-  dev_install_mutex.release();
-  todo!()
+  let device_properties = [
+    DEVPROPERTY {
+      CompKey: DEVPROPCOMPKEY {
+        Key: DEVPKEY_Wintun_Name,
+        Store: DEVPROP_STORE_SYSTEM,
+        LocaleName: null_mut(),
+      },
+      Type: DEVPROP_TYPE_STRING,
+      Buffer: unsafe { name.as_mut_ptr_bypass().cast() },
+      BufferSize: name.sizeof(),
+    },
+    DEVPROPERTY {
+      CompKey: DEVPROPCOMPKEY {
+        Key: DEVPKEY_Device_FriendlyName,
+        Store: DEVPROP_STORE_SYSTEM,
+        LocaleName: null_mut(),
+      },
+      Type: DEVPROP_TYPE_STRING,
+      Buffer: unsafe { tunnel_type.as_mut_ptr_bypass().cast() },
+      BufferSize: tunnel_type.sizeof(),
+    },
+    DEVPROPERTY {
+      CompKey: DEVPROPCOMPKEY {
+        Key: DEVPKEY_Device_DeviceDesc,
+        Store: DEVPROP_STORE_SYSTEM,
+        LocaleName: null_mut(),
+      },
+      Type: DEVPROP_TYPE_STRING,
+      Buffer: unsafe { tunnel_type.as_mut_ptr_bypass().cast() },
+      BufferSize: tunnel_type.sizeof(),
+    },
+  ];
+  let hret = unsafe {
+    SwDeviceCreate(
+      WINTUN_HWID.as_ptr(),
+      root_node_name.as_ptr(),
+      create_info.get_const_ptr(),
+      device_properties.len() as u32,
+      device_properties.as_ptr(),
+      Some(DeviceCreateCallback),
+      create_context.get_mut_ptr().cast(),
+      adapter.SwDevice.get_mut_ptr(),
+    )
+  };
+  if FAILED(hret) {
+    return Err(error!(hret, "Failed to initiate device creation"));
+  }
+  let res = unsafe { WaitForSingleObject(create_context.Triggered, INFINITE) };
+  if res != WAIT_OBJECT_0 {
+    return Err(last_error!("Failed to wait for device creation trigger"));
+  }
+  if FAILED(create_context.CreateResult) {
+    return Err(error!(
+      create_context.CreateResult,
+      "Failed to create device"
+    ));
+  }
+  if let Err(err) = WaitForInterface(&adapter.DevInstanceID) {
+    adapter.DevInfo =
+      unsafe { SetupDiCreateDeviceInfoListExW(null_mut(), null_mut(), null_mut(), null_mut()) };
+    if !check_handle(adapter.DevInfo) {
+      adapter.DevInfo = null_mut();
+      return Err(err);
+    }
+    adapter.DevInfoData.cbSize = csizeof!(=adapter.DevInfoData);
+    let res = unsafe {
+      SetupDiOpenDeviceInfoW(
+        adapter.DevInfo,
+        adapter.DevInstanceID.as_ptr(),
+        null_mut(),
+        DIOD_INHERIT_CLASSDRVS,
+        adapter.DevInfoData.get_mut_ptr(),
+      )
+    };
+    if FALSE == res {
+      unsafe { SetupDiDestroyDeviceInfoList(adapter.DevInfo) };
+      adapter.DevInfo = null_mut();
+      return Err(err);
+    }
+    let mut property_type: DEVPROPTYPE = 0;
+    let mut nt_status: NTSTATUS = 0;
+    let res = unsafe {
+      SetupDiGetDevicePropertyW(
+        adapter.DevInfo,
+        adapter.DevInfoData.get_mut_ptr(),
+        DEVPKEY_Device_ProblemStatus.get_const_ptr(),
+        property_type.get_mut_ptr(),
+        nt_status.get_mut_ptr().cast(),
+        csizeof!(=nt_status),
+        null_mut(),
+        0,
+      )
+    };
+    if FALSE == res || property_type != DEVPROP_TYPE_NTSTATUS {
+      nt_status = 0;
+    }
+    let mut problem_code: INT32 = 0;
+    let res = unsafe {
+      SetupDiGetDevicePropertyW(
+        adapter.DevInfo,
+        adapter.DevInfoData.get_mut_ptr(),
+        DEVPKEY_Device_ProblemCode.get_const_ptr(),
+        property_type.get_mut_ptr(),
+        problem_code.get_mut_ptr().cast(),
+        csizeof!(=problem_code),
+        null_mut(),
+        0,
+      )
+    };
+    if FALSE == res || (property_type != DEVPROP_TYPE_INT32 && property_type != DEVPROP_TYPE_UINT32)
+    {
+      problem_code = 0;
+    }
+    let mut last = unsafe { RtlNtStatusToDosError(nt_status) };
+    if last == ERROR_SUCCESS {
+      last = ERROR_DEVICE_NOT_AVAILABLE;
+    }
+    return Err(error!(
+      last,
+      "Failed to setup adapter (problem code: 0x{:X}, ntstatus: 0x{:X})", problem_code, nt_status
+    ));
+  }
+  Ok(())
 }
 fn WintunCreateAdapterStub(
   instance_id: GUID,
@@ -219,9 +457,9 @@ fn WintunCreateAdapterStub(
   tunnel_type: &WideCStr,
   root_node_name: &WideCStr,
   create_context: &mut SW_DEVICE_CREATE_CTX,
-  adapter: &mut WINTUN_ADAPTER,
+  adapter: &mut Adapter,
 ) -> std::io::Result<()> {
-  let mut stub_create_info = SW_DEVICE_CREATE_INFO {
+  let stub_create_info = SW_DEVICE_CREATE_INFO {
     cbSize: csizeof!(SW_DEVICE_CREATE_INFO),
     pszInstanceId: instance_id_str.as_ptr(),
     pszzHardwareIds: widecstr!("").as_ptr(),
@@ -230,17 +468,17 @@ fn WintunCreateAdapterStub(
     pszDeviceDescription: tunnel_type.as_ptr(),
     ..unsafe { std::mem::zeroed() }
   };
-  let mut stub_device_properties = [DEVPROPERTY {
+  let mut guid_devclass_net = GUID_DEVCLASS_NET;
+  let stub_device_properties = [DEVPROPERTY {
     CompKey: DEVPROPCOMPKEY {
-      Key: DEVPKEY_DeviceInterface_ClassGuid,
+      Key: DEVPKEY_Device_ClassGuid,
       Store: DEVPROP_STORE_SYSTEM,
       ..unsafe { core::mem::zeroed() }
     },
     Type: DEVPROP_TYPE_GUID,
-    Buffer: GUID_DEVCLASS_NET.get_pvoid(),
+    Buffer: guid_devclass_net.get_mut_ptr().cast(),
     BufferSize: csizeof!(=GUID_DEVCLASS_NET),
   }];
-
   let hret = unsafe {
     SwDeviceCreate(
       WINTUN_HWID.as_ptr(),
@@ -249,7 +487,7 @@ fn WintunCreateAdapterStub(
       stub_device_properties.len() as u32,
       stub_device_properties.as_ptr(),
       Some(DeviceCreateCallback),
-      create_context.get_pvoid(),
+      create_context.get_mut_ptr().cast(),
       adapter.SwDevice.get_mut_ptr(),
     )
   };
@@ -264,11 +502,11 @@ fn WintunCreateAdapterStub(
   }
   if FAILED(create_context.CreateResult) {
     return Err(error!(
-      Win32Error::new(create_context.CreateResult as u32),
+      create_context.CreateResult,
       "Failed to create stub device"
     ));
   }
-  let mut dev_inst = unsafe { DEVINST::init_zeroed() };
+  let mut dev_inst: DEVINST = 0;
   let cret = unsafe {
     CM_Locate_DevNodeW(
       dev_inst.get_mut_ptr(),
@@ -282,7 +520,7 @@ fn WintunCreateAdapterStub(
       "Failed to make stub device list"
     ));
   }
-  let mut driver_key = unsafe { HKEY::init_zeroed() };
+  let mut driver_key: HKEY = null_mut();
   let cret = unsafe {
     CM_Open_DevNode_Key(
       dev_inst,
@@ -293,20 +531,20 @@ fn WintunCreateAdapterStub(
       CM_REGISTRY_SOFTWARE,
     )
   };
-  let driver_key = RegKey::from_raw(driver_key);
   if cret != CR_SUCCESS {
     return Err(error!(
       Win32Error::from_cr(cret, ERROR_PNP_REGISTRY_ERROR),
       "Failed to create software registry key"
     ));
   }
+  let driver_key = RegKey::from_raw(driver_key);
   let res = unsafe {
     RegSetValueExW(
       driver_key.as_raw(),
       widecstr!("SuggestedInstanceId").as_ptr(),
       0,
       REG_BINARY,
-      instance_id.get_const_ptr() as *const _,
+      instance_id.get_const_ptr().cast(),
       csizeof!(=instance_id),
     )
   } as u32;
@@ -321,15 +559,125 @@ fn WintunCreateAdapterStub(
   unsafe {
     SwDeviceClose(adapter.SwDevice);
   }
-  adapter.SwDevice = std::ptr::null_mut();
+  adapter.SwDevice = null_mut();
   Ok(())
 }
-pub fn WintunOpenAdapter(Name: &WideCStr) -> std::io::Result<WINTUN_ADAPTER> {
-  // let mut Adapter: *mut WINTUN_ADAPTER = std::ptr::null_mut();
-  // Adapter as *mut _
-  todo!()
+pub fn WintunOpenAdapter(Name: &WideCStr) -> std::io::Result<Adapter> {
+  unsafe { get_system_params() };
+  unsafe_defer! { cleanup <-
+    QueueUpOrphanedDeviceCleanupRoutine();
+  };
+  let dev_install_mutex = match SystemNamedMutexLock::take_device_installation_mutex() {
+    Ok(res) => res,
+    Err(err) => return Err(error!(err, "Failed to take device installation mutex")), // cleanup
+  };
+  let mut adapter = Adapter {
+    InterfaceFilename: Default::default(),
+    DevInstanceID: Default::default(),
+    SwDevice: null_mut(),
+    DevInfo: null_mut(),
+    DevInfoData: unsafe { std::mem::zeroed() },
+    CfgInstanceID: unsafe { std::mem::zeroed() },
+    LuidIndex: 0,
+    IfType: 0,
+    IfIndex: 0,
+  };
+  let adapter_ptr = adapter.get_mut_ptr();
+  unsafe_defer! { cleanupAdapter <-
+    WintunCloseAdapter(&mut *adapter_ptr)
+  };
+  let DevInfo: HDEVINFO = unsafe {
+    SetupDiGetClassDevsExW(
+      &GUID_DEVCLASS_NET,
+      WINTUN_ENUMERATOR.as_ptr(),
+      null_mut(),
+      DIGCF_PRESENT,
+      null_mut(),
+      null_mut(),
+      null_mut(),
+    )
+  };
+  if !check_handle(DevInfo) {
+    return Err(last_error!("Failed to get present adapters"));
+    // goto cleanupAdapter
+  }
+  unsafe_defer! { cleanupDevInfo <-
+    SetupDiDestroyDeviceInfoList(DevInfo);
+  };
+
+  let mut DevInfoData = SP_DEVINFO_DATA {
+    cbSize: csizeof!(SP_DEVINFO_DATA),
+    ..unsafe { std::mem::zeroed() }
+  };
+  let mut Found = false;
+  for EnumIndex in 0.. {
+    if FALSE == unsafe { SetupDiEnumDeviceInfo(DevInfo, EnumIndex, &mut DevInfoData) } {
+      if Win32Error::get_last_error().code() == ERROR_NO_MORE_ITEMS {
+        break;
+      }
+      continue;
+    }
+
+    let mut PropType: DEVPROPTYPE = 0;
+    let mut OtherName = StaticWideCStr::<MAX_ADAPTER_NAME>::zeroed();
+    Found = TRUE
+      == unsafe {
+        SetupDiGetDevicePropertyW(
+          DevInfo,
+          &mut DevInfoData,
+          &DEVPKEY_Wintun_Name,
+          &mut PropType,
+          OtherName.get_mut_ptr().cast(),
+          OtherName.capacity(),
+          null_mut(),
+          0,
+        )
+      }
+      && PropType == DEVPROP_TYPE_STRING
+      && Name == OtherName.as_ref();
+    if Found {
+      break;
+    }
+  }
+  if !Found {
+    return Err(error!(
+      ERROR_NOT_FOUND,
+      "Failed to find matching adapter name"
+    ));
+    //goto cleanupDevInfo;
+  }
+  let mut RequiredChars: DWORD = adapter.DevInstanceID.capacity();
+  if FALSE
+    == unsafe {
+      SetupDiGetDeviceInstanceIdW(
+        DevInfo,
+        &mut DevInfoData,
+        adapter.DevInstanceID.as_mut_ptr(),
+        RequiredChars,
+        &mut RequiredChars,
+      )
+    }
+  {
+    return Err(last_error!("Failed to get adapter instance ID"));
+    // goto cleanupDevInfo;
+  }
+  adapter.DevInfo = DevInfo;
+  adapter.DevInfoData = DevInfoData;
+  let Ret =
+    WaitForInterface(&adapter.DevInstanceID).is_ok() && PopulateAdapterData(&mut adapter).is_ok();
+  adapter.DevInfo = null_mut();
+  if !Ret {
+    return Err(last_error!("Failed to populate adapter"));
+    // goto cleanupDevInfo;
+  }
+  cleanupDevInfo.run();
+  cleanupAdapter.forget();
+  dev_install_mutex.release();
+  cleanup.run();
+  Ok(adapter)
 }
-pub fn WintunCloseAdapter(Adapter: &mut WINTUN_ADAPTER) {
+
+pub fn WintunCloseAdapter(Adapter: &mut Adapter) {
   if !Adapter.SwDevice.is_null() {
     unsafe { SwDeviceClose(Adapter.SwDevice) };
   }
@@ -343,23 +691,23 @@ pub fn WintunCloseAdapter(Adapter: &mut WINTUN_ADAPTER) {
   QueueUpOrphanedDeviceCleanupRoutine();
 }
 
-pub fn WintunGetAdapterLUID(Adapter: &WINTUN_ADAPTER) -> NET_LUID {
+pub fn WintunGetAdapterLUID(Adapter: &Adapter) -> NET_LUID {
   let mut luid = unsafe { NET_LUID::init_zeroed() };
   luid.set_NetLuidIndex(Adapter.LuidIndex as u64);
   luid.set_IfType(Adapter.IfType as u64);
   luid
 }
 
-pub(crate) fn AdapterOpenDeviceObject(Adapter: &WINTUN_ADAPTER) -> std::io::Result<HANDLE> {
+pub(crate) fn AdapterOpenDeviceObject(Adapter: &Adapter) -> std::io::Result<HANDLE> {
   let handle = unsafe {
     CreateFileW(
       Adapter.InterfaceFilename.as_ptr(),
       GENERIC_READ | GENERIC_WRITE,
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-      std::ptr::null_mut(),
+      null_mut(),
       OPEN_EXISTING,
       0,
-      std::ptr::null_mut(),
+      null_mut(),
     )
   };
   if !check_handle(handle) {
@@ -390,10 +738,11 @@ pub(crate) fn AdapterGetDeviceObjectFileName(
   InstanceId: &WideCStr,
 ) -> std::io::Result<WideCString> {
   let mut interface_len = 0;
+  let mut guid_devinterface_net = GUID_DEVINTERFACE_NET;
   let cr = unsafe {
     CM_Get_Device_Interface_List_SizeW(
       interface_len.get_mut_ptr(),
-      GUID_DEVINTERFACE_NET.get_mut_ptr(),
+      guid_devinterface_net.get_mut_ptr(),
       InstanceId.as_ptr() as DEVINSTID_W,
       CM_GET_DEVICE_INTERFACE_LIST_PRESENT,
     )
@@ -409,7 +758,7 @@ pub(crate) fn AdapterGetDeviceObjectFileName(
   let mut interfaces = vec![0 as WCHAR; interface_len as usize];
   let cr = unsafe {
     CM_Get_Device_Interface_ListW(
-      GUID_DEVINTERFACE_NET.get_mut_ptr(),
+      guid_devinterface_net.get_mut_ptr(),
       InstanceId.as_ptr() as DEVINSTID_W,
       interfaces.as_mut_ptr(),
       interface_len,
@@ -435,7 +784,7 @@ pub(crate) struct WAIT_FOR_INTERFACE_CTX {
 
 impl WAIT_FOR_INTERFACE_CTX {
   pub fn new() -> std::io::Result<Self> {
-    let Event = unsafe { CreateEventW(std::ptr::null_mut(), FALSE, FALSE, std::ptr::null()) };
+    let Event = unsafe { CreateEventW(null_mut(), FALSE, FALSE, std::ptr::null()) };
     if !check_handle(Event) {
       return Err(last_error!("Failed to create event"));
     }
@@ -453,7 +802,7 @@ impl Drop for WAIT_FOR_INTERFACE_CTX {
 }
 
 pub(crate) unsafe extern "C" fn WaitForInterfaceCallback(
-  DevQuery: HDEVQUERY,
+  _DevQuery: HDEVQUERY,
   Context: PVOID,
   ActionData: *const DEV_QUERY_RESULT_ACTION_DATA,
 ) {
@@ -461,7 +810,7 @@ pub(crate) unsafe extern "C" fn WaitForInterfaceCallback(
   let ActionData = &*ActionData;
   let mut Ret = ERROR_SUCCESS;
   match ActionData.Action {
-    DevQueryResultStateChange => {
+    _DEV_QUERY_RESULT_ACTION_DevQueryResultStateChange => {
       if ActionData.Data.State != _DEV_QUERY_STATE_DevQueryStateAborted {
         return;
       }
@@ -475,11 +824,14 @@ pub(crate) unsafe extern "C" fn WaitForInterfaceCallback(
 }
 
 pub(crate) fn WaitForInterface(InstanceId: &WideCStr) -> std::io::Result<()> {
-  #[cfg(WIN7)]
-  return Ok(());
-  let len_instance_id: DWORD = InstanceId.len();
-  let sizeof_InstanceId = (len_instance_id + 1) * 2;
+  let system_params = unsafe { get_system_params() };
+  if system_params.IsWindows7 {
+    return Ok(());
+  }
+  let sizeof_InstanceId: DWORD = InstanceId.sizeof();
   let InstanceIdPtr = unsafe { InstanceId.as_mut_ptr_bypass() };
+  let mut devprop_true = DEVPROP_TRUE;
+  let mut guid_devinterface_net = GUID_DEVINTERFACE_NET;
   let Filters = [
     DEVPROP_FILTER_EXPRESSION {
       Operator: _DEVPROP_OPERATOR_DEVPROP_OPERATOR_EQUALS_IGNORE_CASE,
@@ -503,8 +855,8 @@ pub(crate) fn WaitForInterface(InstanceId: &WideCStr) -> std::io::Result<()> {
           ..unsafe { InitZeroed::init_zeroed() }
         },
         Type: DEVPROP_TYPE_BOOLEAN,
-        Buffer: DEVPROP_TRUE.get_pvoid(),
-        BufferSize: std::mem::size_of_val(&DEVPROP_TRUE) as DWORD,
+        Buffer: devprop_true.get_mut_ptr().cast(),
+        BufferSize: csizeof!(=devprop_true),
       },
     },
     DEVPROP_FILTER_EXPRESSION {
@@ -516,13 +868,13 @@ pub(crate) fn WaitForInterface(InstanceId: &WideCStr) -> std::io::Result<()> {
           ..unsafe { InitZeroed::init_zeroed() }
         },
         Type: DEVPROP_TYPE_GUID,
-        Buffer: GUID_DEVINTERFACE_NET.get_pvoid(),
-        BufferSize: std::mem::size_of_val(&GUID_DEVINTERFACE_NET) as DWORD,
+        Buffer: guid_devinterface_net.get_mut_ptr().cast(),
+        BufferSize: csizeof!(=guid_devinterface_net),
       },
     },
   ];
-  let Ctx = WAIT_FOR_INTERFACE_CTX::new()?;
-  let mut Query = unsafe { HDEVQUERY::init_zeroed() };
+  let mut Ctx = WAIT_FOR_INTERFACE_CTX::new()?;
+  let mut Query: HDEVQUERY = null_mut();
   let HRet = unsafe {
     DevCreateObjectQuery(
       _DEV_OBJECT_TYPE_DevObjectTypeDeviceInterface,
@@ -532,15 +884,12 @@ pub(crate) fn WaitForInterface(InstanceId: &WideCStr) -> std::io::Result<()> {
       Filters.len() as DWORD,
       Filters.as_ptr(),
       Some(WaitForInterfaceCallback),
-      Ctx.get_pvoid(),
+      Ctx.get_mut_ptr().cast(),
       Query.get_mut_ptr(),
     )
   };
   if FAILED(HRet) {
-    return Err(error!(
-      HRet,
-      "Failed to create device query"
-    ));
+    return Err(error!(HRet, "Failed to create device query"));
   }
   defer! { cleanupQuery <-
     unsafe { DevCloseObjectQuery(Query) }
@@ -550,37 +899,32 @@ pub(crate) fn WaitForInterface(InstanceId: &WideCStr) -> std::io::Result<()> {
     if result == WAIT_FAILED {
       return Err(last_error!("Failed to wait for device query"));
     }
-    return Err(error!(
-      result,
-      "Timed out waiting for device query"
-    ));
+    return Err(error!(result, "Timed out waiting for device query"));
   }
   if Ctx.LastError != ERROR_SUCCESS {
-    return Err(error!(
-      Ctx.LastError,
-      "Failed to get enabled device"
-    ));
+    return Err(error!(Ctx.LastError, "Failed to get enabled device"));
   }
   cleanupQuery.run();
   Ok(())
 }
 
+#[derive(Debug)]
 #[repr(C)]
 pub(crate) struct SW_DEVICE_CREATE_CTX {
   CreateResult: HRESULT,
-  DeviceInstanceId: Option<WideCString>,
+  DeviceInstanceId: *mut StaticWideCStr<MAX_DEVICE_ID_LEN>,
   Triggered: HANDLE,
 }
 
 impl SW_DEVICE_CREATE_CTX {
-  pub fn new(id: &WideCStr) -> std::io::Result<Self> {
-    let Triggered = unsafe { CreateEventW(std::ptr::null_mut(), FALSE, FALSE, std::ptr::null()) };
+  pub fn new(id: &mut StaticWideCStr<MAX_DEVICE_ID_LEN>) -> std::io::Result<Self> {
+    let Triggered = unsafe { CreateEventW(null_mut(), FALSE, FALSE, std::ptr::null()) };
     if !check_handle(Triggered) {
       return Err(last_error!("Failed to create event"));
     }
     Ok(Self {
       CreateResult: 0,
-      DeviceInstanceId: Some(id.into()),
+      DeviceInstanceId: id.get_mut_ptr(),
       Triggered,
     })
   }
@@ -593,7 +937,7 @@ impl Drop for SW_DEVICE_CREATE_CTX {
 }
 
 pub(crate) unsafe extern "C" fn DeviceCreateCallback(
-  SwDevice: HSWDEVICE,
+  _SwDevice: HSWDEVICE,
   CreateResult: HRESULT,
   Context: PVOID,
   DeviceInstanceId: PCWSTR,
@@ -601,10 +945,8 @@ pub(crate) unsafe extern "C" fn DeviceCreateCallback(
   let Ctx = &mut *(Context as *mut SW_DEVICE_CREATE_CTX);
   Ctx.CreateResult = CreateResult;
   if !DeviceInstanceId.is_null() {
-    Ctx.DeviceInstanceId = Some(WideCString::from_ptr_truncate(
-      DeviceInstanceId,
-      MAX_DEVICE_ID_LEN,
-    ));
+    *Ctx.DeviceInstanceId =
+      StaticWideCStr::<MAX_DEVICE_ID_LEN>::from_ptr_unchecked(DeviceInstanceId, MAX_DEVICE_ID_LEN);
   }
   SetEvent(Ctx.Triggered);
 }
@@ -709,9 +1051,7 @@ pub(crate) fn AdapterDisableInstance(
   Ok(())
 }
 
-fn PopulateAdapterData(Adapter: &mut WINTUN_ADAPTER) -> std::io::Result<()> {
-  let mut LastError = ERROR_SUCCESS;
-
+fn PopulateAdapterData(Adapter: &mut Adapter) -> std::io::Result<()> {
   let Key = RegKey::open(
     Adapter.DevInfo,
     Adapter.DevInfoData.get_mut_ptr(),
@@ -722,7 +1062,7 @@ fn PopulateAdapterData(Adapter: &mut WINTUN_ADAPTER) -> std::io::Result<()> {
   )?;
 
   let value_str = RegistryQueryString(&Key, widecstr!("NetCfgInstanceId"), true)?;
-  let result = unsafe { CLSIDFromString(value_str.as_ptr(), &mut Adapter.CfgInstanceID) };
+  let result = unsafe { CLSIDFromString(value_str.as_ptr(), Adapter.CfgInstanceID.get_mut_ptr()) };
   if FAILED(result) {
     let reg_path = LoggerGetRegistryKeyPath(&Key);
     return Err(last_error!(
@@ -734,7 +1074,7 @@ fn PopulateAdapterData(Adapter: &mut WINTUN_ADAPTER) -> std::io::Result<()> {
   Adapter.LuidIndex = RegistryQueryDWORD(&Key, widecstr!("NetLuidIndex"), true)?;
   Adapter.IfType = RegistryQueryDWORD(&Key, widecstr!("*IfType"), true)?;
   Adapter.InterfaceFilename = AdapterGetDeviceObjectFileName(Adapter.DevInstanceID.as_ref())?;
-
+  Key.close();
   Ok(())
 }
 
@@ -755,7 +1095,7 @@ fn QueueUpOrphanedDeviceCleanupRoutine() {
     .ignore()
     == false
   {
-    unsafe { QueueUserWorkItem(Some(DoOrphanedDeviceCleanup), std::ptr::null_mut(), 0) };
+    unsafe { QueueUserWorkItem(Some(DoOrphanedDeviceCleanup), null_mut(), 0) };
   }
 }
 
@@ -778,11 +1118,11 @@ pub fn AdapterCleanupOrphanedDevices() {
     SetupDiGetClassDevsExW(
       &GUID_DEVCLASS_NET,
       WINTUN_ENUMERATOR.as_ptr(),
-      std::ptr::null_mut(),
+      null_mut(),
       0,
-      std::ptr::null_mut(),
-      std::ptr::null_mut(),
-      std::ptr::null_mut(),
+      null_mut(),
+      null_mut(),
+      null_mut(),
     )
   };
   if DevInfo == INVALID_HANDLE_VALUE {
@@ -831,7 +1171,7 @@ pub fn AdapterCleanupOrphanedDevices() {
         PropType.get_mut_ptr(),
         NamePtr,
         SIZE_OF_NAME,
-        std::ptr::null_mut(),
+        null_mut(),
         0,
       )
     };
@@ -856,11 +1196,11 @@ fn RenameByNetGUID(Guid: GUID, Name: &WideCStr) -> std::io::Result<()> {
     SetupDiGetClassDevsExW(
       GUID_DEVCLASS_NET.get_const_ptr(),
       WINTUN_ENUMERATOR.as_ptr(),
-      std::ptr::null_mut(),
+      null_mut(),
       0,
-      std::ptr::null_mut(),
-      std::ptr::null_mut(),
-      std::ptr::null_mut(),
+      null_mut(),
+      null_mut(),
+      null_mut(),
     )
   };
   if DevInfo == INVALID_HANDLE_VALUE {

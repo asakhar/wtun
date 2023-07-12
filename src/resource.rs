@@ -52,9 +52,9 @@ pub fn create_temp_dir() -> std::io::Result<PathBuf> {
     Err(err) => return Err(error!(err, "Failed to get Windows folder")),
   };
   let temp_path = windows_dir_path.join("Temp");
-  const HEX: [char; 16] = b"0123456789ABCDEF".map(|c| c as char);
+  const HEX: [u8; 16] = *b"0123456789ABCDEF";
   let hex_dist = rand::distributions::Slice::new(&HEX).unwrap();
-  let random_hex_string: String = rand::thread_rng().sample_iter(&hex_dist).take(32).collect();
+  let random_hex_string: String = rand::thread_rng().sample_iter(&hex_dist).take(32).map(|c| *c as char).collect();
   let random_temp_sub_dir_path = temp_path.join(random_hex_string);
   // TODO: std::fs::set_permissions(path, perm)
   std::fs::create_dir_all(&random_temp_sub_dir_path)

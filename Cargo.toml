@@ -38,6 +38,9 @@ winapi = { version = "0.3.9", features = [
 ] }
 cutils = { git = "https://github.com/asakhar/cutils.git" }
 
+[dev-dependencies]
+chrono = "*"
+
 [features]
 default = ["windows_10", "wow64_support"]
 wow64_support = []

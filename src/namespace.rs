@@ -1,4 +1,4 @@
-use std::cell::UnsafeCell;
+use std::{cell::UnsafeCell, marker::PhantomData};
 
 use cutils::{inspection::GetPtrExt, strings::WideCStr, unsafe_defer, widecstr};
 use get_last_error::Win32Error;
@@ -77,11 +77,11 @@ impl Drop for SystemNamedMutexLock {
 }
 
 pub unsafe fn NamespaceInit() {
-  Initializing.init();
+  INITIALIZING.init();
 }
 
 pub unsafe fn NamespaceDone() {
-  let section = unsafe { Initializing.enter() };
+  let section = unsafe { INITIALIZING.enter() };
   if !unsafe { PrivateNamespace.is_null() } {
     ClosePrivateNamespace(PrivateNamespace, 0);
     DeleteBoundaryDescriptor(BoundaryDescriptor);
@@ -89,19 +89,22 @@ pub unsafe fn NamespaceDone() {
     BoundaryDescriptor = std::ptr::null_mut();
   }
   section.leave();
-  unsafe { Initializing.delete() };
+  unsafe { INITIALIZING.delete() };
 }
 
 struct SystemCriticalSection(UnsafeCell<CRITICAL_SECTION>);
 
 impl SystemCriticalSection {
-  fn new() -> Self {
-    let section: CRITICAL_SECTION = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
+  const fn new() -> Self {
+    // const impl of:
+    //  let section: CRITICAL_SECTION = unsafe { std::mem::zeroed() };
+    let section_bytes = [0u8; std::mem::size_of::<CRITICAL_SECTION>()];
+    let section: CRITICAL_SECTION = unsafe { std::mem::transmute(section_bytes) };
     let section = UnsafeCell::new(section);
     SystemCriticalSection(section)
   }
   unsafe fn init(&self) {
-    let section_ptr = self.0.get_mut() as *mut _;
+    let section_ptr = self.0.get();
     InitializeCriticalSection(section_ptr);
   }
   unsafe fn enter(&self) -> SystemCriticalSectionLock {
@@ -110,7 +113,7 @@ impl SystemCriticalSection {
     SystemCriticalSectionLock(section)
   }
   unsafe fn delete(&self) {
-    DeleteCriticalSection(self.0.get_mut())
+    DeleteCriticalSection(self.0.get())
   }
 }
 
@@ -131,15 +134,13 @@ impl Drop for SystemCriticalSectionLock {
   }
 }
 
-lazy_static! {
-  static ref Initializing: SystemCriticalSection = SystemCriticalSection::new();
-}
+static INITIALIZING: SystemCriticalSection = SystemCriticalSection::new();
 
 static mut PrivateNamespace: HANDLE = std::ptr::null_mut();
 static mut BoundaryDescriptor: HANDLE = std::ptr::null_mut();
 
 fn NamespaceRuntimeInit() -> std::io::Result<()> {
-  let section = unsafe { Initializing.enter() };
+  let section = unsafe { INITIALIZING.enter() };
   if !unsafe { PrivateNamespace.is_null() } {
     return Ok(());
   }

@@ -1,7 +1,7 @@
 use cutils::{
   csizeof, cstr,
   inspection::{CastToMutVoidPtrExt, GetPtrExt, InitZeroed},
-  unsafe_defer, widecstr
+  unsafe_defer, widecstr,
 };
 use winapi::{
   shared::{
@@ -22,49 +22,74 @@ use winapi::{
 };
 
 use crate::{
-  logger::last_error, namespace::NamespaceInit, ntdll::RtlGetNtVersionNumbers,
-  winapi_ext::devquery::USHORT, adapter_win7::cleanup_lagacy_devices,
+  adapter_win7::cleanup_lagacy_devices, logger::last_error, namespace::NamespaceInit,
+  ntdll::RtlGetNtVersionNumbers, winapi_ext::devquery::USHORT,
 };
 
-struct SystemParams {
+pub struct SystemParams {
   pub SecurityAttributes: SECURITY_ATTRIBUTES,
   pub IsLocalSystem: bool,
   pub NativeMachine: USHORT,
   pub IsWindows7: bool,
   pub IsWindows10: bool,
 }
-unsafe impl Sync for SystemParams {}
-static mut SYSTEM_PARAMS: std::cell::UnsafeCell<SystemParams> =
-  std::cell::UnsafeCell::new(SystemParams {
-    SecurityAttributes: SECURITY_ATTRIBUTES {
-      nLength: csizeof!(SECURITY_ATTRIBUTES),
-      lpSecurityDescriptor: std::ptr::null_mut(),
-      bInheritHandle: 0,
-    },
-    IsLocalSystem: false,
-    NativeMachine: 0,
-    IsWindows7: false,
-    IsWindows10: true,
-  });
-pub unsafe fn get_system_params<'a>() -> &'a mut SystemParams {
-  let params = &mut *SYSTEM_PARAMS.get();
-  static INIT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-  INIT.get_or_init(|| {
-    let (SecurityAttributes, IsLocalSystem) = InitializeSecurityObjects().unwrap();
-    let (IsWindows7, IsWindows10, NativeMachine) = EnvInit();
-    unsafe {
-      NamespaceInit();
+
+impl std::fmt::Debug for SystemParams {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    struct SecAttrs<'a>(&'a SECURITY_ATTRIBUTES);
+    impl<'a> std::fmt::Debug for SecAttrs<'a> {
+      fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecurityAttributes")
+          .field("bInheritHandle", &self.0.bInheritHandle)
+          .field("lpSecurityDescriptor", &self.0.lpSecurityDescriptor)
+          .field("nLength", &self.0.nLength)
+          .finish()
+      }
     }
-    cleanup_lagacy_devices();
-    *params = SystemParams {
-      SecurityAttributes,
-      IsLocalSystem,
-      NativeMachine,
-      IsWindows7,
-      IsWindows10,
-    };
-  });
-  params
+    f.debug_struct("SystemParams")
+      .field("SecurityAttributes", &SecAttrs(&self.SecurityAttributes))
+      .field("IsLocalSystem", &self.IsLocalSystem)
+      .field("NativeMachine", &self.NativeMachine)
+      .field("IsWindows7", &self.IsWindows7)
+      .field("IsWindows10", &self.IsWindows10)
+      .finish()
+  }
+}
+unsafe impl Sync for SystemParams {}
+pub unsafe fn get_system_params<'a>() -> &'a mut SystemParams {
+  static mut SYSTEM_PARAMS: std::cell::UnsafeCell<SystemParams> =
+    std::cell::UnsafeCell::new(SystemParams {
+      SecurityAttributes: SECURITY_ATTRIBUTES {
+        nLength: csizeof!(SECURITY_ATTRIBUTES),
+        lpSecurityDescriptor: std::ptr::null_mut(),
+        bInheritHandle: 0,
+      },
+      IsLocalSystem: false,
+      NativeMachine: 0,
+      IsWindows7: false,
+      IsWindows10: true,
+    });
+  static mut INIT: std::sync::OnceLock<&'static std::cell::UnsafeCell<SystemParams>> =
+    std::sync::OnceLock::new();
+  &mut *INIT
+    .get_or_init(|| {
+      let params = &mut *SYSTEM_PARAMS.get();
+      let (SecurityAttributes, IsLocalSystem) = InitializeSecurityObjects().unwrap();
+      let (IsWindows7, IsWindows10, NativeMachine) = EnvInit();
+      unsafe {
+        NamespaceInit();
+      }
+      cleanup_lagacy_devices();
+      *params = SystemParams {
+        SecurityAttributes,
+        IsLocalSystem,
+        NativeMachine,
+        IsWindows7,
+        IsWindows10,
+      };
+      &SYSTEM_PARAMS
+    })
+    .get()
 }
 fn InitializeSecurityObjects() -> std::io::Result<(SECURITY_ATTRIBUTES, bool)> {
   let mut SecurityAttributes = SECURITY_ATTRIBUTES {
@@ -192,11 +217,13 @@ fn EnvInit() -> (bool, bool, USHORT) {
       return (IsWindows7, IsWindows10, get_native_machine());
     }
     let IsWow64Process2: IsWow64Process2Func = unsafe { std::mem::transmute(IsWow64Process2) };
-    if IsWow64Process2(
-      unsafe { GetCurrentProcess() },
-      ProcessMachine.get_mut_ptr(),
-      unsafe { NativeMachine.get_mut_ptr() },
-    ) == FALSE
+    if unsafe {
+      IsWow64Process2(
+        GetCurrentProcess(),
+        ProcessMachine.get_mut_ptr(),
+        NativeMachine.get_mut_ptr(),
+      )
+    } == FALSE
     {
       return (IsWindows7, IsWindows10, get_native_machine());
     }

@@ -314,7 +314,7 @@ pub fn DriverInstallDeferredCleanup(
   ExistingAdapters: &mut SP_DEVINFO_DATA_LIST,
 ) {
   if !ExistingAdapters.is_empty() {
-    EnableAllOurAdapters(DevInfoExistingAdapters, ExistingAdapters);
+    drop(EnableAllOurAdapters(DevInfoExistingAdapters, ExistingAdapters));
     ExistingAdapters.clear();
   }
   if check_handle(DevInfoExistingAdapters) {
