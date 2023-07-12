@@ -491,7 +491,7 @@ pub fn cleanup_orphaned_devices_win7() {
   let DevInfo = unsafe {
     SetupDiGetClassDevsExW(
       GUID_DEVCLASS_NET.get_const_ptr(),
-      WINTUN_ENUMERATOR.as_ptr(),
+      WINTUN_ENUMERATOR!().as_ptr(),
       std::ptr::null_mut(),
       0,
       std::ptr::null_mut(),

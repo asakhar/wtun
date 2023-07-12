@@ -94,7 +94,17 @@ use crate::wmain::{get_system_params, IMAGE_FILE_PROCESS};
 // use crate::winapi_ext::devquerydef::{DEV_QUERY_RESULT_ACTION_DATA, _DEV_QUERY_STATE_DevQueryStateAborted};
 
 pub(crate) const WINTUN_HWID: &WideCStr = widecstr!("Wintun");
-pub(crate) const WINTUN_ENUMERATOR: &WideCStr = widecstr!(r"ROOT\Wintun");
+macro_rules! WINTUN_ENUMERATOR {
+  () => {
+    if unsafe { $crate::wmain::get_system_params() }.IsWindows7 {
+      widecstr!(r"ROOT\Wintun")
+    } else {
+      widecstr!(r"SWD\Wintun")
+    }
+  }
+}
+pub(crate) use WINTUN_ENUMERATOR;
+// pub(crate) const WINTUN_ENUMERATOR: &WideCStr = widecstr!(r"ROOT\Wintun");
 
 pub(crate) const DEVPKEY_Wintun_Name: DEVPROPKEY = DEVPROPKEY {
   fmtid: DEVPROPGUID {
@@ -582,6 +592,7 @@ pub fn WintunOpenAdapter(Name: &WideCStr) -> std::io::Result<Adapter> {
     IfType: 0,
     IfIndex: 0,
   };
+  info!("Opening adapter: {}", Name.display());
   let adapter_ptr = adapter.get_mut_ptr();
   unsafe_defer! { cleanupAdapter <-
     WintunCloseAdapter(&mut *adapter_ptr)
@@ -589,7 +600,7 @@ pub fn WintunOpenAdapter(Name: &WideCStr) -> std::io::Result<Adapter> {
   let DevInfo: HDEVINFO = unsafe {
     SetupDiGetClassDevsExW(
       &GUID_DEVCLASS_NET,
-      WINTUN_ENUMERATOR.as_ptr(),
+      WINTUN_ENUMERATOR!().as_ptr(),
       null_mut(),
       DIGCF_PRESENT,
       null_mut(),
@@ -1117,7 +1128,7 @@ pub fn AdapterCleanupOrphanedDevices() {
   let DevInfo = unsafe {
     SetupDiGetClassDevsExW(
       &GUID_DEVCLASS_NET,
-      WINTUN_ENUMERATOR.as_ptr(),
+      WINTUN_ENUMERATOR!().as_ptr(),
       null_mut(),
       0,
       null_mut(),
@@ -1195,7 +1206,7 @@ fn RenameByNetGUID(Guid: GUID, Name: &WideCStr) -> std::io::Result<()> {
   let DevInfo = unsafe {
     SetupDiGetClassDevsExW(
       GUID_DEVCLASS_NET.get_const_ptr(),
-      WINTUN_ENUMERATOR.as_ptr(),
+      WINTUN_ENUMERATOR!().as_ptr(),
       null_mut(),
       0,
       null_mut(),

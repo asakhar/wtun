@@ -417,7 +417,7 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
         dev_info_existing_adapters = unsafe {
           SetupDiGetClassDevsExW(
             GUID_DEVCLASS_NET.get_const_ptr(),
-            WINTUN_ENUMERATOR.as_ptr(),
+            WINTUN_ENUMERATOR!().as_ptr(),
             std::ptr::null_mut(),
             DIGCF_PRESENT,
             std::ptr::null_mut(),
