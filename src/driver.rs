@@ -291,7 +291,7 @@ fn MaybeGetRunningDriverVersion(ReturnOneIfRunningInsteadOfVersion: bool) -> std
   Err(std::io::Error::from_raw_os_error(ERROR_FILE_NOT_FOUND as i32))
 }
 
-pub fn WintunGetRunningDriverVersion() -> std::io::Result<DWORD> {
+pub fn get_running_driver_version() -> std::io::Result<DWORD> {
   MaybeGetRunningDriverVersion(false)
 }
 

@@ -145,6 +145,15 @@ impl Adapter {
     )?;
     WintunOpenAdapter(&name)
   }
+  pub fn close(self) {
+    drop(self)
+  }
+  pub fn get_luid(&self) -> NET_LUID {
+    WintunGetAdapterLUID(self)
+  }
+  pub fn get_guid(&self) -> GUID{
+    self.CfgInstanceID
+  }
 }
 
 impl Drop for Adapter {
@@ -696,7 +705,7 @@ pub fn WintunCloseAdapter(Adapter: &mut Adapter) {
 }
 
 pub fn WintunGetAdapterLUID(Adapter: &Adapter) -> NET_LUID {
-  let mut luid = unsafe { NET_LUID::init_zeroed() };
+  let mut luid: NET_LUID = unsafe { std::mem::zeroed() };
   luid.set_NetLuidIndex(Adapter.LuidIndex as u64);
   luid.set_IfType(Adapter.IfType as u64);
   luid
