@@ -290,6 +290,9 @@ pub struct Session {
   recv_tail_moved: Event,
 }
 
+unsafe impl Send for Session {}
+unsafe impl Sync for Session {}
+
 impl std::fmt::Debug for Session {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     f.debug_struct("Session")

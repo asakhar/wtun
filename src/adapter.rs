@@ -1,6 +1,7 @@
 use std::pin::Pin;
 use std::ptr::null_mut;
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 
 use cutils::ignore::ResultIgnoreExt;
 use cutils::inspection::{CastToMutVoidPtrExt, GetPtrExt, InitZeroed};
@@ -126,6 +127,48 @@ pub struct Adapter {
   pub(crate) IfIndex: DWORD,
 }
 
+unsafe impl Sync for Adapter {}
+unsafe impl Send for Adapter {}
+
+pub trait ConstructsAndProvidesAdapter: Unpin {
+  type MutRef<'a>: std::ops::DerefMut<Target = Adapter> where Self: 'a;
+  fn construct(adapter: Adapter) -> Self;
+  fn provide<'a, 'this>(&'this mut self) -> Self::MutRef<'a> where 'this: 'a;
+}
+
+impl ConstructsAndProvidesAdapter for Pin<Box<Adapter>> {
+  type MutRef<'a> = &'a mut Adapter;
+  fn construct(adapter: Adapter) -> Self {
+    Box::pin(adapter)
+  }
+
+  fn provide<'a, 'this>(&'this mut self) -> Self::MutRef<'a> where 'this: 'a {
+    &mut *self
+  }
+}
+
+impl ConstructsAndProvidesAdapter for Pin<Arc<Mutex<Adapter>>> {
+  type MutRef<'a> = std::sync::MutexGuard<'a, Adapter>;
+  fn construct(adapter: Adapter) -> Self {
+    Arc::pin(Mutex::new(adapter))
+  }
+
+  fn provide<'a, 'this>(&'this mut self) -> Self::MutRef<'a> where 'this: 'a {
+    self.lock().unwrap()
+  }
+}
+
+impl ConstructsAndProvidesAdapter for Pin<std::rc::Rc<std::cell::RefCell<Adapter>>> {
+  type MutRef<'a> = std::cell::RefMut<'a, Adapter>;
+  fn construct(adapter: Adapter) -> Self {
+    std::rc::Rc::pin(std::cell::RefCell::new(adapter))
+  }
+
+  fn provide<'a,'this>(&'this mut self) -> Self::MutRef<'a> where 'this: 'a {
+    self.try_borrow_mut().unwrap()
+  }
+}
+
 impl Adapter {
   pub fn create(
     name: &str,
@@ -142,13 +185,36 @@ impl Adapter {
       ))?;
     WintunCreateAdapter(&name, &tunnel_type, requested_guid)
   }
+  pub fn create_wrapped<T: ConstructsAndProvidesAdapter>(
+    name: &str,
+    tunnel_type: &str,
+    requested_guid: Option<GUID>,
+  ) -> std::io::Result<T> {
+    let name: StaticWideCStr<MAX_ADAPTER_NAME> = cutils::strings::encode(name).ok_or(
+      std::io::Error::new(std::io::ErrorKind::InvalidInput, "Tunnel name is too long"),
+    )?;
+    let tunnel_type: StaticWideCStr<MAX_ADAPTER_NAME> = cutils::strings::encode(tunnel_type)
+      .ok_or(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "Tunnel type is too long",
+      ))?;
+    WintunCreateAdapter(&name, &tunnel_type, requested_guid)
+  }
   pub fn open(name: &str) -> std::io::Result<Pin<Box<Adapter>>> {
     let name: StaticWideCStr<MAX_ADAPTER_NAME> = cutils::strings::encode(name).ok_or(
       std::io::Error::new(std::io::ErrorKind::InvalidInput, "Tunnel name is too long"),
     )?;
     WintunOpenAdapter(&name)
   }
-  pub fn close(self) {
+  pub fn open_wrapped<T: ConstructsAndProvidesAdapter>(
+    name: &str,
+  ) -> std::io::Result<T> {
+    let name: StaticWideCStr<MAX_ADAPTER_NAME> = cutils::strings::encode(name).ok_or(
+      std::io::Error::new(std::io::ErrorKind::InvalidInput, "Tunnel name is too long"),
+    )?;
+    WintunOpenAdapter(&name)
+  }
+  pub fn close(self: Pin<Box<Adapter>>) {
     drop(self)
   }
   pub fn get_luid(&self) -> NET_LUID {
@@ -210,11 +276,11 @@ impl Drop for Adapter {
   }
 }
 
-pub fn WintunCreateAdapter(
+pub fn WintunCreateAdapter<T: ConstructsAndProvidesAdapter>(
   name: &StaticWideCStr<MAX_ADAPTER_NAME>,
   tunnel_type: &StaticWideCStr<MAX_ADAPTER_NAME>,
   requested_guid: Option<GUID>,
-) -> std::io::Result<Pin<Box<Adapter>>> {
+) -> std::io::Result<T> {
   let _system_params = unsafe { get_system_params() };
   unsafe_defer! { cleanup <-
     QueueUpOrphanedDeviceCleanupRoutine();
@@ -225,7 +291,7 @@ pub fn WintunCreateAdapter(
   };
   let (dev_info_existing_adapters, mut existing_adapters) = DriverInstall()?; // cleanupDeviceInstallationMutex
   info!("Creating adapter");
-  let mut adapter = Box::pin(Adapter {
+  let mut adapter = T::construct(Adapter {
     InterfaceFilename: Default::default(),
     DevInstanceID: Default::default(),
     SwDevice: null_mut(),
@@ -239,7 +305,8 @@ pub fn WintunCreateAdapter(
   unsafe_defer! { cleanupDriverInstall <-
     DriverInstallDeferredCleanup(dev_info_existing_adapters, &mut existing_adapters);
   };
-  let adapter_ptr = (*adapter).get_mut_ptr();
+  let mut adapter_prov = adapter.provide();
+  let adapter_ptr = (*adapter_prov).get_mut_ptr();
   unsafe_defer! { cleanupAdapter <-
     WintunCloseAdapter(&mut *adapter_ptr)
   };
@@ -293,10 +360,10 @@ pub fn WintunCreateAdapter(
     return Err(last_error!("Failed to convert GUID"));
   }
 
-  let mut create_context = SW_DEVICE_CREATE_CTX::new(&mut adapter.DevInstanceID)?;
+  let mut create_context = SW_DEVICE_CREATE_CTX::new(&mut adapter_prov.DevInstanceID)?;
   let system_params = unsafe { get_system_params() };
   if system_params.IsWindows7 {
-    create_adapter_win7(&mut adapter, &name, &tunnel_type)?;
+    create_adapter_win7(&mut adapter_prov, &name, &tunnel_type)?;
     // goto skipSwDevice
   } else {
     if system_params.IsWindows10 {
@@ -306,7 +373,7 @@ pub fn WintunCreateAdapter(
         &tunnel_type,
         &root_node_name,
         &mut create_context,
-        &mut adapter,
+        &mut adapter_prov,
       )?;
     }
     WintunCreateAdapterSwDevice(
@@ -315,10 +382,10 @@ pub fn WintunCreateAdapter(
       &tunnel_type,
       &root_node_name,
       &mut create_context,
-      &mut adapter,
+      &mut adapter_prov,
     )?;
   }
-  adapter.DevInfo = unsafe {
+  adapter_prov.DevInfo = unsafe {
     SetupDiCreateDeviceInfoListExW(
       GUID_DEVCLASS_NET.get_const_ptr(),
       null_mut(),
@@ -326,34 +393,34 @@ pub fn WintunCreateAdapter(
       null_mut(),
     )
   };
-  if !check_handle(adapter.DevInfo) {
-    adapter.DevInfo = null_mut();
+  if !check_handle(adapter_prov.DevInfo) {
+    adapter_prov.DevInfo = null_mut();
     return Err(last_error!("Failed to make device list"));
   }
-  adapter.DevInfoData.cbSize = csizeof!(=adapter.DevInfoData);
+  adapter_prov.DevInfoData.cbSize = csizeof!(=adapter_prov.DevInfoData);
   let res = unsafe {
     SetupDiOpenDeviceInfoW(
-      adapter.DevInfo,
-      adapter.DevInstanceID.as_ptr(),
+      adapter_prov.DevInfo,
+      adapter_prov.DevInstanceID.as_ptr(),
       null_mut(),
       DIOD_INHERIT_CLASSDRVS,
-      adapter.DevInfoData.get_mut_ptr(),
+      adapter_prov.DevInfoData.get_mut_ptr(),
     )
   };
   if FALSE == res {
     let last = std::io::Error::last_os_error();
-    unsafe { SetupDiDestroyDeviceInfoList(adapter.DevInfo) };
-    adapter.DevInfo = null_mut();
+    unsafe { SetupDiDestroyDeviceInfoList(adapter_prov.DevInfo) };
+    adapter_prov.DevInfo = null_mut();
     return Err(error!(
       last,
       "Failed to open device instance ID {}",
-      adapter.DevInstanceID.display()
+      adapter_prov.DevInstanceID.display()
     ));
   }
-  if let Err(err) = PopulateAdapterData(&mut adapter) {
+  if let Err(err) = PopulateAdapterData(&mut adapter_prov) {
     return Err(error!(err, "Failed to populate adapter data"));
   }
-  if let Err(err) = NciSetAdapterName(adapter.CfgInstanceID, &name) {
+  if let Err(err) = NciSetAdapterName(adapter_prov.CfgInstanceID, &name) {
     return Err(error!(
       err,
       "Failed to set adapter name \"{}\"",
@@ -361,8 +428,9 @@ pub fn WintunCreateAdapter(
     ));
   }
   if system_params.IsWindows7 {
-    create_adapter_post_win7(&mut adapter, &tunnel_type)
+    create_adapter_post_win7(&mut adapter_prov, &tunnel_type)
   }
+  drop(adapter_prov);
   cleanupAdapter.forget();
   cleanupDriverInstall.run();
   dev_install_mutex.release();
@@ -622,7 +690,7 @@ fn WintunCreateAdapterStub(
   adapter.SwDevice = null_mut();
   Ok(())
 }
-pub fn WintunOpenAdapter(Name: &WideCStr) -> std::io::Result<Pin<Box<Adapter>>> {
+pub fn WintunOpenAdapter<T: ConstructsAndProvidesAdapter>(Name: &WideCStr) -> std::io::Result<T> {
   unsafe { get_system_params() };
   unsafe_defer! { cleanup <-
     QueueUpOrphanedDeviceCleanupRoutine();
@@ -631,7 +699,7 @@ pub fn WintunOpenAdapter(Name: &WideCStr) -> std::io::Result<Pin<Box<Adapter>>> 
     Ok(res) => res,
     Err(err) => return Err(error!(err, "Failed to take device installation mutex")), // cleanup
   };
-  let mut adapter = Box::pin(Adapter {
+  let mut adapter = T::construct(Adapter {
     InterfaceFilename: Default::default(),
     DevInstanceID: Default::default(),
     SwDevice: null_mut(),
@@ -643,7 +711,8 @@ pub fn WintunOpenAdapter(Name: &WideCStr) -> std::io::Result<Pin<Box<Adapter>>> 
     IfIndex: 0,
   });
   info!("Opening adapter: {}", Name.display());
-  let adapter_ptr = adapter.get_mut_ptr();
+  let mut adapter_prov = adapter.provide();
+  let adapter_ptr = (*adapter_prov).get_mut_ptr();
   unsafe_defer! { cleanupAdapter <-
     WintunCloseAdapter(&mut *adapter_ptr)
   };
@@ -707,13 +776,13 @@ pub fn WintunOpenAdapter(Name: &WideCStr) -> std::io::Result<Pin<Box<Adapter>>> 
     ));
     //goto cleanupDevInfo;
   }
-  let mut RequiredChars: DWORD = adapter.DevInstanceID.capacity();
+  let mut RequiredChars: DWORD = adapter_prov.DevInstanceID.capacity();
   if FALSE
     == unsafe {
       SetupDiGetDeviceInstanceIdW(
         DevInfo,
         &mut DevInfoData,
-        adapter.DevInstanceID.as_mut_ptr(),
+        adapter_prov.DevInstanceID.as_mut_ptr(),
         RequiredChars,
         &mut RequiredChars,
       )
@@ -722,11 +791,11 @@ pub fn WintunOpenAdapter(Name: &WideCStr) -> std::io::Result<Pin<Box<Adapter>>> 
     return Err(last_error!("Failed to get adapter instance ID"));
     // goto cleanupDevInfo;
   }
-  adapter.DevInfo = DevInfo;
-  adapter.DevInfoData = DevInfoData;
+  adapter_prov.DevInfo = DevInfo;
+  adapter_prov.DevInfoData = DevInfoData;
   let Ret =
-    WaitForInterface(&adapter.DevInstanceID).is_ok() && PopulateAdapterData(&mut adapter).is_ok();
-  adapter.DevInfo = null_mut();
+    WaitForInterface(&adapter_prov.DevInstanceID).is_ok() && PopulateAdapterData(&mut adapter_prov).is_ok();
+    adapter_prov.DevInfo = null_mut();
   if !Ret {
     return Err(last_error!("Failed to populate adapter"));
     // goto cleanupDevInfo;
@@ -735,6 +804,7 @@ pub fn WintunOpenAdapter(Name: &WideCStr) -> std::io::Result<Pin<Box<Adapter>>> 
   cleanupAdapter.forget();
   dev_install_mutex.release();
   cleanup.run();
+  drop(adapter_prov);
   Ok(adapter)
 }
 
