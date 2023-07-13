@@ -10,7 +10,8 @@ use cutils::{check_handle, csizeof, inspection::GetPtrExt, unsafe_defer};
 use winapi::{
   shared::{
     minwindef::{DWORD, FALSE, UCHAR, UINT, ULONG},
-    ntdef::HANDLE, winerror::WAIT_TIMEOUT,
+    ntdef::HANDLE,
+    winerror::WAIT_TIMEOUT,
   },
   um::{
     handleapi::CloseHandle,
@@ -21,7 +22,7 @@ use winapi::{
       CreateEventW, DeleteCriticalSection, EnterCriticalSection,
       InitializeCriticalSectionAndSpinCount, LeaveCriticalSection, SetEvent, WaitForSingleObject,
     },
-    winbase::{INFINITE, WAIT_OBJECT_0, WAIT_FAILED},
+    winbase::{INFINITE, WAIT_FAILED, WAIT_OBJECT_0},
     winnt::{
       FILE_READ_DATA, FILE_WRITE_DATA, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE,
     },
@@ -268,6 +269,7 @@ pub struct Session {
   send: SessionSend,
   descriptor: TunRegisterRings,
   handle: ObjectHandle,
+  recv_tail_moved: Event,
 }
 
 impl std::fmt::Debug for Session {
@@ -280,7 +282,12 @@ impl std::fmt::Debug for Session {
 }
 
 impl Session {
-  fn new(descriptor: TunRegisterRings, handle: ObjectHandle, capacity: ULONG) -> Pin<Box<Self>> {
+  fn new(
+    recv_tail_moved: Event,
+    descriptor: TunRegisterRings,
+    handle: ObjectHandle,
+    capacity: ULONG,
+  ) -> Pin<Box<Self>> {
     let recv = SessionRecv::default();
     let send = SessionSend::default();
     let mut session = Box::pin(Self {
@@ -289,6 +296,7 @@ impl Session {
       capacity,
       recv,
       send,
+      recv_tail_moved,
     });
     unsafe { session.recv.lock.init() };
     unsafe { session.send.lock.init() };
@@ -303,8 +311,10 @@ pub(crate) fn WintunStartSession(
   let system_params = unsafe { get_system_params() };
   let ring_size = tun_ring_size(capacity);
   let descriptor = TunRegisterRings::new(&mut system_params.SecurityAttributes, ring_size)?;
+  let recv_tail_moved = Event::new(&mut system_params.SecurityAttributes)
+    .map_err(|err| error!(err, "Failed to create dup recv event"))?;
   let handle = ObjectHandle::open(adapter)?;
-  let mut session = Session::new(descriptor, handle, capacity);
+  let mut session = Session::new(recv_tail_moved, descriptor, handle, capacity);
   let mut BytesReturned: DWORD = 0;
   if FALSE
     == unsafe {
@@ -327,16 +337,17 @@ pub(crate) fn WintunStartSession(
 }
 
 impl Session {
-  pub fn is_read_avaliable(
-    &self,
-  ) -> std::io::Result<bool> {
+  pub fn is_read_avaliable(&self) -> std::io::Result<bool> {
     let read_event = self.GetReadWaitEvent();
     let res = unsafe { WaitForSingleObject(read_event.0, 0) };
     match res {
       WAIT_OBJECT_0 => Ok(true),
       WAIT_TIMEOUT => Ok(false),
       WAIT_FAILED => Err(std::io::Error::last_os_error()),
-      other => Err(std::io::Error::new(std::io::ErrorKind::Other, format!("WaitForSingleObject returned: {other}")))
+      other => Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!("WaitForSingleObject returned: {other}"),
+      )),
     }
   }
   pub fn block_until_read_avaliable(
@@ -361,14 +372,17 @@ impl Session {
       WAIT_OBJECT_0 => Ok(()),
       WAIT_TIMEOUT => Err(std::io::ErrorKind::TimedOut.into()),
       WAIT_FAILED => Err(std::io::Error::last_os_error()),
-      other => Err(std::io::Error::new(std::io::ErrorKind::Other, format!("WaitForSingleObject returned: {other}")))
+      other => Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!("WaitForSingleObject returned: {other}"),
+      )),
     }
   }
   pub fn GetReadWaitEvent(&self) -> &Event {
     &self.descriptor.send.tail_moved
   }
   pub fn GetWriteWaitEvent(&self) -> &Event {
-    &self.descriptor.recv.tail_moved
+    &self.recv_tail_moved
   }
 }
 
@@ -651,6 +665,7 @@ impl<'a> Drop for SendPacket<'a> {
         != 0
       {
         unsafe { SetEvent(session.descriptor.recv.tail_moved.0) };
+        unsafe { SetEvent(session.recv_tail_moved.0) };
       }
     }
     guard.leave();
