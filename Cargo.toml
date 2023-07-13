@@ -10,6 +10,9 @@ get-last-error = "0.1.1"
 lazy_static = "1.4.0"
 rand = "0.8.5"
 winapi = { version = "0.3.9", features = [
+  "wininet",
+  "iphlpapi",
+  "ipexport",
   "netioapi",
   "minwindef",
   "devpropdef",
@@ -29,6 +32,7 @@ winapi = { version = "0.3.9", features = [
   "devguid",
   "ipexport",
   "impl-debug",
+  "impl-default",
   "devpkey",
   "corecrt",
   "winver",

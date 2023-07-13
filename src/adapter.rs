@@ -65,7 +65,6 @@ use winapi::um::winnt::{
 use winapi::um::winreg::RegSetValueExW;
 use winapi::DEFINE_GUID;
 
-use crate::RingCapacity;
 use crate::adapter_win7::{create_adapter_post_win7, create_adapter_win7};
 use crate::driver::{DriverInstall, DriverInstallDeferredCleanup};
 use crate::logger::LoggerGetRegistryKeyPath;
@@ -89,6 +88,7 @@ use crate::winapi_ext::swdevice::{
 };
 use crate::winapi_ext::winternl::RtlNtStatusToDosError;
 use crate::wmain::{get_system_params, IMAGE_FILE_PROCESS};
+use crate::{IpAndMaskPrefix, RingCapacity};
 
 pub(crate) const WINTUN_HWID: &WideCStr = widecstr!("Wintun");
 macro_rules! WINTUN_ENUMERATOR {
@@ -98,7 +98,7 @@ macro_rules! WINTUN_ENUMERATOR {
     } else {
       widecstr!(r"SWD\Wintun")
     }
-  }
+  };
 }
 pub(crate) use WINTUN_ENUMERATOR;
 
@@ -154,11 +154,53 @@ impl Adapter {
   pub fn get_luid(&self) -> NET_LUID {
     WintunGetAdapterLUID(self)
   }
-  pub fn get_guid(&self) -> GUID{
+  pub fn get_guid(&self) -> GUID {
     self.CfgInstanceID
   }
   pub fn start_session(&mut self, capacity: RingCapacity) -> std::io::Result<Pin<Box<Session>>> {
     WintunStartSession(self, capacity.0)
+  }
+  pub fn set_ip_address(&mut self, internal_ip: IpAndMaskPrefix) -> std::io::Result<()> {
+    let mut address_row = winapi::shared::netioapi::MIB_UNICASTIPADDRESS_ROW::default();
+    unsafe {
+      winapi::shared::netioapi::InitializeUnicastIpAddressEntry(&mut address_row as *mut _);
+    }
+    const IP_SUFFIX_ORIGIN_DHCP: winapi::shared::nldef::NL_SUFFIX_ORIGIN = 3;
+    const IP_PREFIX_ORIGIN_DHCP: winapi::shared::nldef::NL_PREFIX_ORIGIN = 3;
+    address_row.SuffixOrigin = IP_SUFFIX_ORIGIN_DHCP;
+    address_row.PrefixOrigin = IP_PREFIX_ORIGIN_DHCP;
+    const LIFETIME_INFINITE: winapi::ctypes::c_ulong = 0xffffffff;
+    address_row.ValidLifetime = LIFETIME_INFINITE;
+    address_row.PreferredLifetime = LIFETIME_INFINITE;
+    address_row.InterfaceLuid = winapi::shared::ifdef::NET_LUID_LH {
+      Value: self.get_luid().Value,
+    };
+    match internal_ip {
+      IpAndMaskPrefix::V4 { ip, prefix } => {
+        unsafe {
+          let ipv4 = address_row.Address.Ipv4_mut();
+          ipv4.sin_family = winapi::shared::ws2def::AF_INET as _;
+          *ipv4.sin_addr.S_un.S_addr_mut() = u32::from_ne_bytes(ip.octets());
+        }
+        address_row.OnLinkPrefixLength = prefix.mask();
+      }
+      IpAndMaskPrefix::V6 { ip, prefix } => {
+        unsafe {
+          let ipv6 = address_row.Address.Ipv6_mut();
+          ipv6.sin6_family = winapi::shared::ws2def::AF_INET6 as _;
+          *ipv6.sin6_addr.u.Byte_mut() = ip.octets();
+        }
+        address_row.OnLinkPrefixLength = prefix.mask();
+      }
+    }
+
+    address_row.DadState = winapi::shared::nldef::IpDadStatePreferred;
+    let error =
+      unsafe { winapi::shared::netioapi::CreateUnicastIpAddressEntry(&mut address_row as *mut _) };
+    if error != NO_ERROR {
+      return Err(std::io::Error::from_raw_os_error(error as i32));
+    }
+    Ok(())
   }
 }
 
