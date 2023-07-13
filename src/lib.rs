@@ -58,10 +58,21 @@ impl RingCapacity {
   }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RingCapacityError {
   TooBig,
   TooSmall,
   NotAPowerOfTwo,
+}
+
+impl std::fmt::Display for RingCapacityError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str(match self {
+      Self::TooBig => "Choosen capacity is too big (consider MAX_RING_CAPACITY)",
+      Self::TooSmall => "Choosen capacity is too small (consider MIN_RING_CAPACITY)",
+      Self::NotAPowerOfTwo => "Choosen capacity is not a power of two",
+    })
+  }
 }
 
 impl TryFrom<ULONG> for RingCapacity {
@@ -105,7 +116,7 @@ impl PacketSize {
 impl PacketSize {
   pub const fn new(value: ULONG) -> Result<Self, PacketSizeError> {
     if value == 0 {
-      return Err(PacketSizeError::IsNul);
+      return Err(PacketSizeError::IsZero);
     }
     if value > MAX_IP_PACKET_SIZE {
       return Err(PacketSizeError::TooBig);
@@ -117,9 +128,19 @@ impl PacketSize {
   }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PacketSizeError {
-  IsNul,
+  IsZero,
   TooBig,
+}
+
+impl std::fmt::Display for PacketSizeError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str(match self {
+      Self::TooBig => "Packet is too big (consider MAX_IP_PACKET_SIZE)",
+      Self::IsZero => "Packet size can not be zero",
+    })
+  }
 }
 
 impl TryFrom<ULONG> for PacketSize {
