@@ -20,7 +20,7 @@ mod winapi_ext;
 mod wintun_inf;
 mod wmain;
 
-pub use adapter::Adapter;
+pub use adapter::{Adapter, ConstructsAndProvidesAdapter};
 pub use driver::get_running_driver_version;
 pub use logger::{set_logger, LogLevel};
 pub use session::{

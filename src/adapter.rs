@@ -74,7 +74,7 @@ use crate::namespace::SystemNamedMutexLock;
 use crate::nci::SetConnectionName;
 use crate::registry::{RegKey, RegistryQueryDWORD, RegistryQueryString};
 use crate::rundll32::{enable_instance, remove_instance};
-use crate::session::{Session, WintunStartSession};
+use crate::session::{Session, WintunStartSession, ConstrunctsAndProvidesSession};
 use crate::winapi_ext::devquery::{
   DevCloseObjectQuery, DevCreateObjectQuery, _DEV_OBJECT_TYPE_DevObjectTypeDeviceInterface,
   _DEV_QUERY_FLAGS_DevQueryFlagUpdateResults, _DEV_QUERY_RESULT_ACTION_DevQueryResultAdd,
@@ -224,6 +224,9 @@ impl Adapter {
     self.CfgInstanceID
   }
   pub fn start_session(&mut self, capacity: RingCapacity) -> std::io::Result<Pin<Box<Session>>> {
+    WintunStartSession(self, capacity.0)
+  }
+  pub fn start_session_wrapped<T: ConstrunctsAndProvidesSession>(&mut self, capacity: RingCapacity) -> std::io::Result<T> {
     WintunStartSession(self, capacity.0)
   }
   pub fn set_ip_address(&mut self, internal_ip: IpAndMaskPrefix) -> std::io::Result<()> {

@@ -1,10 +1,15 @@
-use std::{cell::UnsafeCell, pin::Pin, ptr::null_mut, sync::atomic::Ordering};
+use std::{
+  cell::UnsafeCell,
+  pin::Pin,
+  ptr::null_mut,
+  sync::{atomic::Ordering, Arc},
+};
 
 use crate::{
   adapter::AdapterOpenDeviceObject,
   logger::{error, last_error},
   wmain::get_system_params,
-  Adapter, MAX_IP_PACKET_SIZE, PacketSize,
+  Adapter, PacketSize, MAX_IP_PACKET_SIZE,
 };
 use cutils::{check_handle, csizeof, inspection::GetPtrExt, unsafe_defer};
 use winapi::{
@@ -280,6 +285,26 @@ impl ObjectHandle {
   }
 }
 
+pub trait ConstrunctsAndProvidesSession: std::ops::Deref<Target = Session> + Unpin {
+  fn construct(session: Session) -> Self;
+}
+
+impl ConstrunctsAndProvidesSession for Pin<Arc<Session>> {
+  fn construct(session: Session) -> Self {
+    Arc::pin(session)
+  }
+}
+impl ConstrunctsAndProvidesSession for Pin<Box<Session>> {
+  fn construct(session: Session) -> Self {
+    Box::pin(session)
+  }
+}
+impl ConstrunctsAndProvidesSession for Pin<std::rc::Rc<Session>> {
+  fn construct(session: Session) -> Self {
+    std::rc::Rc::pin(session)
+  }
+}
+
 #[repr(C)]
 pub struct Session {
   capacity: ULONG,
@@ -323,26 +348,53 @@ impl Session {
     unsafe { session.send.lock.init() };
     session
   }
+  fn new_wrapped<T: ConstrunctsAndProvidesSession>(
+    recv_tail_moved: Event,
+    descriptor: TunRegisterRings,
+    handle: ObjectHandle,
+    capacity: ULONG,
+  ) -> T {
+    let recv = SessionRecv::default();
+    let send = SessionSend::default();
+    let session = T::construct(Self {
+      descriptor,
+      handle,
+      capacity,
+      recv,
+      send,
+      recv_tail_moved,
+    });
+    let session_ptr: *const Session = &*session;
+    let session_ptr: *const UnsafeCell<Session> = session_ptr.cast();
+    let session_mut: &mut Session = unsafe { &mut *(*session_ptr).get() };
+    unsafe { session_mut.recv.lock.init() };
+    unsafe { session_mut.send.lock.init() };
+    drop(session_mut);
+    session
+  }
 }
 
-pub(crate) fn WintunStartSession(
+pub(crate) fn WintunStartSession<T: ConstrunctsAndProvidesSession>(
   adapter: &mut Adapter,
   capacity: DWORD,
-) -> std::io::Result<Pin<Box<Session>>> {
+) -> std::io::Result<T> {
   let system_params = unsafe { get_system_params() };
   let ring_size = tun_ring_size(capacity);
   let descriptor = TunRegisterRings::new(&mut system_params.SecurityAttributes, ring_size)?;
   let recv_tail_moved = Event::new_ex(&mut system_params.SecurityAttributes, false, true)
     .map_err(|err| error!(err, "Failed to create dup recv event"))?;
   let handle = ObjectHandle::open(adapter)?;
-  let mut session = Session::new(recv_tail_moved, descriptor, handle, capacity);
+  let session: T = Session::new_wrapped(recv_tail_moved, descriptor, handle, capacity);
+  let session_ptr: *const Session = &*session;
+  let session_ptr: *const UnsafeCell<Session> = session_ptr.cast();
+  let session_mut: &mut Session = unsafe { &mut *(*session_ptr).get() };
   let mut BytesReturned: DWORD = 0;
   if FALSE
     == unsafe {
       DeviceIoControl(
         session.handle.0,
         TUN_IOCTL_REGISTER_RINGS,
-        session.descriptor.get_mut_ptr().cast(),
+        session_mut.descriptor.get_mut_ptr().cast(),
         csizeof!(TunRegisterRings),
         null_mut(),
         0,
@@ -353,7 +405,7 @@ pub(crate) fn WintunStartSession(
   {
     return Err(last_error!("Failed to register rings"));
   }
-  session.capacity = capacity;
+  drop(session_mut);
   Ok(session)
 }
 
