@@ -83,3 +83,15 @@ fn creates_and_recvs() {
   let packet = session.recv().unwrap();
   println!("{packet:#?}");
 }
+
+
+#[test]
+fn creates_and_sends_alerts() {
+  set_logger(logger);
+  let mut adapter = Adapter::create("test", "test type", None).unwrap();
+  let session = adapter.start_session(ring_capacity!(MAX_RING_CAPACITY)).unwrap();
+  let mut packet = session.allocate(123).unwrap();
+  let packet_write = packet.write();
+  make_icmp(packet_write);
+  packet.send();
+}

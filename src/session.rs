@@ -337,9 +337,22 @@ pub(crate) fn WintunStartSession(
 }
 
 impl Session {
-  pub fn is_read_avaliable(&self) -> std::io::Result<bool> {
-    let read_event = self.GetReadWaitEvent();
+  pub fn is_write_avaliable(&self) -> std::io::Result<bool> {
+    let read_event = self.GetWriteWaitEvent();
     let res = unsafe { WaitForSingleObject(read_event.0, 0) };
+    match res {
+      WAIT_OBJECT_0 => Ok(true),
+      WAIT_TIMEOUT => Ok(false),
+      WAIT_FAILED => Err(std::io::Error::last_os_error()),
+      other => Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!("WaitForSingleObject returned: {other}"),
+      )),
+    }
+  }
+  pub fn is_read_avaliable(&self) -> std::io::Result<bool> {
+    let write_event = self.GetReadWaitEvent();
+    let res = unsafe { WaitForSingleObject(write_event.0, 0) };
     match res {
       WAIT_OBJECT_0 => Ok(true),
       WAIT_TIMEOUT => Ok(false),
@@ -368,6 +381,34 @@ impl Session {
       .flatten()
       .unwrap_or(INFINITE);
     let res = unsafe { WaitForSingleObject(read_event.0, millis) };
+    match res {
+      WAIT_OBJECT_0 => Ok(()),
+      WAIT_TIMEOUT => Err(std::io::ErrorKind::TimedOut.into()),
+      WAIT_FAILED => Err(std::io::Error::last_os_error()),
+      other => Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!("WaitForSingleObject returned: {other}"),
+      )),
+    }
+  }
+  pub fn block_until_write_avaliable(
+    &self,
+    timeout: Option<std::time::Duration>,
+  ) -> std::io::Result<()> {
+    let write_event = self.GetWriteWaitEvent();
+    let millis = timeout
+      .as_ref()
+      .map(std::time::Duration::as_millis)
+      .map(|millis| {
+        if millis > DWORD::MAX as u128 {
+          None
+        } else {
+          Some(millis as DWORD)
+        }
+      })
+      .flatten()
+      .unwrap_or(INFINITE);
+    let res = unsafe { WaitForSingleObject(write_event.0, millis) };
     match res {
       WAIT_OBJECT_0 => Ok(()),
       WAIT_TIMEOUT => Err(std::io::ErrorKind::TimedOut.into()),
