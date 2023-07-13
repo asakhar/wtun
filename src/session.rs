@@ -9,7 +9,7 @@ use crate::{
 use cutils::{check_handle, csizeof, inspection::GetPtrExt, unsafe_defer};
 use winapi::{
   shared::{
-    minwindef::{DWORD, FALSE, UCHAR, UINT, ULONG},
+    minwindef::{DWORD, FALSE, TRUE, UCHAR, UINT, ULONG},
     ntdef::HANDLE,
     winerror::WAIT_TIMEOUT,
   },
@@ -108,6 +108,24 @@ pub struct Event(pub HANDLE);
 impl Event {
   fn new(security_attributes: &mut SECURITY_ATTRIBUTES) -> std::io::Result<Self> {
     let event = unsafe { CreateEventW(security_attributes, FALSE, FALSE, null_mut()) };
+    if !check_handle(event) {
+      return Err(std::io::Error::last_os_error());
+    }
+    Ok(Self(event))
+  }
+  fn new_ex(
+    security_attributes: &mut SECURITY_ATTRIBUTES,
+    manual_reset: bool,
+    initial_state: bool,
+  ) -> std::io::Result<Self> {
+    let event = unsafe {
+      CreateEventW(
+        security_attributes,
+        if manual_reset { TRUE } else { FALSE },
+        if initial_state { TRUE } else { FALSE },
+        null_mut(),
+      )
+    };
     if !check_handle(event) {
       return Err(std::io::Error::last_os_error());
     }
@@ -311,7 +329,7 @@ pub(crate) fn WintunStartSession(
   let system_params = unsafe { get_system_params() };
   let ring_size = tun_ring_size(capacity);
   let descriptor = TunRegisterRings::new(&mut system_params.SecurityAttributes, ring_size)?;
-  let recv_tail_moved = Event::new(&mut system_params.SecurityAttributes)
+  let recv_tail_moved = Event::new_ex(&mut system_params.SecurityAttributes, false, true)
     .map_err(|err| error!(err, "Failed to create dup recv event"))?;
   let handle = ObjectHandle::open(adapter)?;
   let mut session = Session::new(recv_tail_moved, descriptor, handle, capacity);
