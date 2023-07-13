@@ -656,6 +656,7 @@ impl<'a> Drop for SendPacket<'a> {
         unsafe { *session.recv.tail_release.get() },
         Ordering::Release,
       );
+      unsafe { SetEvent(session.recv_tail_moved.0) };
       if session
         .descriptor
         .recv
@@ -665,7 +666,6 @@ impl<'a> Drop for SendPacket<'a> {
         != 0
       {
         unsafe { SetEvent(session.descriptor.recv.tail_moved.0) };
-        unsafe { SetEvent(session.recv_tail_moved.0) };
       }
     }
     guard.leave();
