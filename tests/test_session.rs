@@ -62,9 +62,10 @@ fn make_icmp<'a, 'p>(mut packet: SendPacketWrite<'a, 'p>) {
 fn creates_session() {
   set_logger(logger);
   let mut adapter: Pin<Box<Adapter>> = Adapter::create("test", "test type", None).unwrap();
-  let _session = adapter
+  let session = adapter
     .start_session(ring_capacity!(MAX_RING_CAPACITY))
     .unwrap();
+  session.close();
 }
 #[test]
 fn creates_and_sends() {
@@ -77,6 +78,7 @@ fn creates_and_sends() {
   let packet_write = packet.write();
   make_icmp(packet_write);
   packet.send();
+  session.close();
 }
 #[test]
 fn creates_and_recvs() {
@@ -88,6 +90,8 @@ fn creates_and_recvs() {
   session.block_until_read_avaliable(None).unwrap();
   let packet = session.recv().unwrap();
   println!("{packet:#?}");
+  packet.release();
+  session.close();
 }
 
 #[test]
@@ -112,4 +116,5 @@ fn creates_and_sends_alerts() {
     packet.send();
   }
   assert_ne!(session.is_write_avaliable().unwrap(), true);
+  session.close();
 }
