@@ -1,4 +1,4 @@
-use std::{cell::UnsafeCell, ptr::null_mut};
+use std::{cell::UnsafeCell, pin::Pin, ptr::null_mut, sync::atomic::Ordering};
 
 use crate::{
   adapter::AdapterOpenDeviceObject,
@@ -10,14 +10,18 @@ use cutils::{check_handle, csizeof, inspection::GetPtrExt, unsafe_defer};
 use winapi::{
   shared::{
     minwindef::{DWORD, FALSE, UCHAR, UINT, ULONG},
-    ntdef::{HANDLE, LONG},
+    ntdef::HANDLE, winerror::WAIT_TIMEOUT,
   },
   um::{
     handleapi::CloseHandle,
     ioapiset::DeviceIoControl,
     memoryapi::{VirtualAlloc, VirtualFree},
     minwinbase::{CRITICAL_SECTION, SECURITY_ATTRIBUTES},
-    synchapi::{CreateEventW, DeleteCriticalSection, InitializeCriticalSectionAndSpinCount},
+    synchapi::{
+      CreateEventW, DeleteCriticalSection, EnterCriticalSection,
+      InitializeCriticalSectionAndSpinCount, LeaveCriticalSection, SetEvent, WaitForSingleObject,
+    },
+    winbase::{INFINITE, WAIT_OBJECT_0, WAIT_FAILED},
     winnt::{
       FILE_READ_DATA, FILE_WRITE_DATA, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE,
     },
@@ -26,32 +30,35 @@ use winapi::{
 
 const TUN_ALIGNMENT: ULONG = csizeof!(ULONG);
 pub(crate) const fn tun_align(size: ULONG) -> ULONG {
-  (size + (TUN_ALIGNMENT - 1)) & !(TUN_ALIGNMENT - 1)
+  (size.wrapping_add(TUN_ALIGNMENT.wrapping_sub(1))) & !(TUN_ALIGNMENT.wrapping_sub(1))
 }
-pub(crate) fn tun_is_aligned<T: TryInto<ULONG> + Default>(size: T) -> bool {
-  let size = size.try_into().unwrap_or_default();
-  (size & (TUN_ALIGNMENT - 1)) == 0
+pub(crate) fn tun_is_aligned(size: ULONG) -> bool {
+  (size & (TUN_ALIGNMENT.wrapping_sub(1))) == 0
 }
 const TUN_PACKET_SIZE: ULONG = csizeof!(TunPacket);
 const TUN_RING_SIZE: ULONG = csizeof!(TunRing);
-const TUN_MAX_PACKET_SIZE: ULONG = tun_align(TUN_PACKET_SIZE + MAX_IP_PACKET_SIZE);
-pub(crate) fn tun_ring_capacity<T: TryInto<ULONG> + Default>(size: T) -> ULONG {
-  let size = size.try_into().unwrap_or_default();
-  size - TUN_RING_SIZE - (TUN_MAX_PACKET_SIZE - TUN_ALIGNMENT)
+const TUN_MAX_PACKET_SIZE: ULONG = tun_align(TUN_PACKET_SIZE.wrapping_add(MAX_IP_PACKET_SIZE));
+pub(crate) const fn tun_ring_capacity(size: usize) -> ULONG {
+  let size = size as ULONG;
+  size
+    .wrapping_sub(TUN_RING_SIZE)
+    .wrapping_sub(TUN_MAX_PACKET_SIZE.wrapping_sub(TUN_ALIGNMENT))
 }
-pub(crate) fn tun_ring_size(capacity: ULONG) -> usize {
-  (TUN_RING_SIZE + (capacity) + (TUN_MAX_PACKET_SIZE - TUN_ALIGNMENT)) as usize
+pub(crate) const fn tun_ring_size(capacity: ULONG) -> usize {
+  (TUN_RING_SIZE
+    .wrapping_add(capacity)
+    .wrapping_add(TUN_MAX_PACKET_SIZE.wrapping_sub(TUN_ALIGNMENT))) as usize
 }
-pub(crate) fn tun_ring_wrap<T1: TryInto<ULONG> + Default, T2: TryInto<ULONG> + Default>(
-  value: T1,
-  capacity: T2,
-) -> ULONG {
-  let capacity = capacity.try_into().unwrap_or_default();
-  let value = value.try_into().unwrap_or_default();
-  value & (capacity - 1)
+pub(crate) const fn tun_ring_wrap(value: ULONG, capacity: ULONG) -> ULONG {
+  value & (capacity.wrapping_sub(1))
 }
 const LOCK_SPIN_COUNT: DWORD = 0x10000;
 const TUN_PACKET_RELEASE: DWORD = 0x80000000;
+const OFFSETOF_TUN_PACKET_DATA: isize = csizeof!(ULONG);
+
+const __CHECK_OFFSETOF_TUN_PACKET_DATA: () = {
+  assert!(OFFSETOF_TUN_PACKET_DATA == std::mem::size_of::<TunPacket>() as isize);
+};
 
 #[repr(C)]
 struct TunPacket {
@@ -59,12 +66,26 @@ struct TunPacket {
   data: [UCHAR; 0],
 }
 
+const __CHECK_ATOMIC_U32: () = {
+  assert!(std::mem::size_of::<ULONG>() == std::mem::size_of::<std::sync::atomic::AtomicU32>());
+};
+
+// #[cfg(target_has_atomic_load_store = "32")]
 #[repr(C)]
 struct TunRing {
-  head: UnsafeCell<ULONG>,
-  tail: UnsafeCell<ULONG>,
-  alertable: UnsafeCell<LONG>,
+  head: std::sync::atomic::AtomicU32,
+  tail: std::sync::atomic::AtomicU32,
+  alertable: std::sync::atomic::AtomicU32,
   data: [UCHAR; 0],
+}
+
+impl TunRing {
+  unsafe fn get(&self, idx: ULONG) -> &TunPacket {
+    &*self.data.as_ptr().add(idx as usize).cast()
+  }
+  unsafe fn get_mut(&mut self, idx: ULONG) -> &mut TunPacket {
+    &mut *self.data.as_mut_ptr().add(idx as usize).cast()
+  }
 }
 
 const fn ctl_code(device_type: UINT, function: UINT, method: UINT, access: UINT) -> UINT {
@@ -79,8 +100,19 @@ const TUN_IOCTL_REGISTER_RINGS: UINT = ctl_code(
   FILE_READ_DATA | FILE_WRITE_DATA,
 );
 
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct Event(pub HANDLE);
+
+impl Event {
+  fn new(security_attributes: &mut SECURITY_ATTRIBUTES) -> std::io::Result<Self> {
+    let event = unsafe { CreateEventW(security_attributes, FALSE, FALSE, null_mut()) };
+    if !check_handle(event) {
+      return Err(std::io::Error::last_os_error());
+    }
+    Ok(Self(event))
+  }
+}
 
 impl Drop for Event {
   fn drop(&mut self) {
@@ -95,6 +127,15 @@ struct TunRegisterRing {
   tail_moved: Event,
 }
 
+impl TunRegisterRing {
+  fn ring(&self) -> &TunRing {
+    unsafe { &*self.ring }
+  }
+  fn ring_mut(&self) -> &mut TunRing {
+    unsafe { &mut *self.ring }
+  }
+}
+
 #[repr(C)]
 struct TunRegisterRings {
   send: TunRegisterRing,
@@ -104,47 +145,120 @@ struct TunRegisterRings {
 impl TunRegisterRings {
   fn new(
     security_attributes: &mut SECURITY_ATTRIBUTES,
-    region: *mut u8,
     ring_size_usize: usize,
   ) -> std::io::Result<Self> {
-    let ring_size = ring_size_usize as ULONG;
-    let tail_moved = unsafe { CreateEventW(security_attributes, FALSE, FALSE, null_mut()) };
-    if !check_handle(tail_moved) {
-      return Err(last_error!("Failed to create send event"));
+    let region: *mut u8 = unsafe {
+      VirtualAlloc(
+        null_mut(),
+        ring_size_usize * 2,
+        MEM_COMMIT | MEM_RESERVE,
+        PAGE_READWRITE,
+      )
     }
-    let tail_moved = Event(tail_moved);
+    .cast();
+    if region.is_null() {
+      return Err(last_error!(
+        "Failed to allocate ring memory (requested size: 0x{:x})",
+        ring_size_usize * 2
+      ));
+    }
+    unsafe_defer! { cleanupRegion <-
+      VirtualFree(region.cast(), 0, MEM_RELEASE);
+    };
+    let ring_size = ring_size_usize as ULONG;
+    let tail_moved =
+      Event::new(security_attributes).map_err(|err| error!(err, "Failed to create send event"))?;
     let send = TunRegisterRing {
       ring_size,
       ring: region.cast(),
       tail_moved,
     };
-    let tail_moved = unsafe { CreateEventW(security_attributes, FALSE, FALSE, null_mut()) };
-    if !check_handle(tail_moved) {
-      return Err(last_error!("Failed to create receive event"));
-    };
-    let tail_moved = Event(tail_moved);
+    let tail_moved = Event::new(security_attributes)
+      .map_err(|err| error!(err, "Failed to create receive event"))?;
     let recv = TunRegisterRing {
       ring_size,
       ring: unsafe { region.add(ring_size_usize) }.cast(),
       tail_moved,
     };
+    cleanupRegion.forget();
     Ok(Self { send, recv })
   }
 }
+
+impl Drop for TunRegisterRings {
+  fn drop(&mut self) {
+    unsafe { VirtualFree(self.send.ring.cast(), 0, MEM_RELEASE) };
+  }
+}
+
+#[repr(transparent)]
+struct CriticalSection(UnsafeCell<CRITICAL_SECTION>);
+#[must_use]
+struct CriticalSectionGuard<'a>(&'a CriticalSection);
+impl<'a> Drop for CriticalSectionGuard<'a> {
+  fn drop(&mut self) {
+    unsafe { LeaveCriticalSection(self.0 .0.get()) };
+  }
+}
+impl<'a> CriticalSectionGuard<'a> {
+  fn leave(self) {
+    drop(self)
+  }
+}
+impl Default for CriticalSection {
+  fn default() -> Self {
+    Self(unsafe { std::mem::zeroed() })
+  }
+}
+impl CriticalSection {
+  unsafe fn init(&mut self) {
+    InitializeCriticalSectionAndSpinCount(self.0.get(), LOCK_SPIN_COUNT);
+  }
+  unsafe fn enter<'a>(&'a self) -> CriticalSectionGuard<'a> {
+    EnterCriticalSection(self.0.get());
+    CriticalSectionGuard(self)
+  }
+}
+impl Drop for CriticalSection {
+  fn drop(&mut self) {
+    unsafe { DeleteCriticalSection(self.0.get()) };
+  }
+}
+
+#[derive(Default)]
 #[repr(C)]
 struct SessionRecv {
-  tail: ULONG,
-  tail_release: ULONG,
-  packets_to_release: ULONG,
-  lock: CRITICAL_SECTION,
+  tail: UnsafeCell<ULONG>,
+  tail_release: UnsafeCell<ULONG>,
+  packets_to_release: UnsafeCell<ULONG>,
+  lock: CriticalSection,
 }
-#[repr(C)]
 
+#[derive(Default)]
+#[repr(C)]
 struct SessionSend {
-  head: ULONG,
-  head_release: ULONG,
-  packets_to_release: ULONG,
-  lock: CRITICAL_SECTION,
+  head: UnsafeCell<ULONG>,
+  head_release: UnsafeCell<ULONG>,
+  packets_to_release: UnsafeCell<ULONG>,
+  lock: CriticalSection,
+}
+
+#[derive(Debug)]
+#[repr(transparent)]
+struct ObjectHandle(HANDLE);
+
+impl Drop for ObjectHandle {
+  fn drop(&mut self) {
+    unsafe { CloseHandle(self.0) };
+  }
+}
+
+impl ObjectHandle {
+  fn open(adapter: &mut Adapter) -> std::io::Result<Self> {
+    AdapterOpenDeviceObject(adapter)
+      .map(ObjectHandle)
+      .map_err(|err| error!(err, "Failed to open adapter device object"))
+  }
 }
 
 #[repr(C)]
@@ -153,65 +267,49 @@ pub struct Session {
   recv: SessionRecv,
   send: SessionSend,
   descriptor: TunRegisterRings,
-  handle: HANDLE,
+  handle: ObjectHandle,
+}
+
+impl std::fmt::Debug for Session {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("Session")
+      .field("capacity", &self.capacity)
+      .field("handle", &self.handle)
+      .finish()
+  }
 }
 
 impl Session {
-  fn new(descriptor: TunRegisterRings, handle: HANDLE, capacity: ULONG) -> Self {
-    let recv =  unsafe { std::mem::zeroed() } ;
-    let send =  unsafe { std::mem::zeroed() } ;
-    Self {
+  fn new(descriptor: TunRegisterRings, handle: ObjectHandle, capacity: ULONG) -> Pin<Box<Self>> {
+    let recv = SessionRecv::default();
+    let send = SessionSend::default();
+    let mut session = Box::pin(Self {
       descriptor,
       handle,
       capacity,
       recv,
-      send
-    }
+      send,
+    });
+    unsafe { session.recv.lock.init() };
+    unsafe { session.send.lock.init() };
+    session
   }
 }
 
 pub(crate) fn WintunStartSession(
   adapter: &mut Adapter,
   capacity: DWORD,
-) -> std::io::Result<Session> {
+) -> std::io::Result<Pin<Box<Session>>> {
   let system_params = unsafe { get_system_params() };
   let ring_size = tun_ring_size(capacity);
-  let allocated_region: *mut u8 = unsafe {
-    VirtualAlloc(
-      null_mut(),
-      ring_size * 2,
-      MEM_COMMIT | MEM_RESERVE,
-      PAGE_READWRITE,
-    )
-  }
-  .cast();
-  if allocated_region.is_null() {
-    return Err(last_error!(
-      "Failed to allocate ring memory (requested size: 0x{:x})",
-      ring_size * 2
-    ));
-  }
-  unsafe_defer! { cleanupRegion <-
-    VirtualFree(allocated_region.cast(), 0, MEM_RELEASE);
-  };
-  let descriptor = TunRegisterRings::new(
-    &mut system_params.SecurityAttributes,
-    allocated_region,
-    ring_size,
-  )?;
-  let handle = match AdapterOpenDeviceObject(adapter) {
-    Ok(res) => res,
-    Err(err) => {
-      return Err(error!(err, "Failed to open adapter device object"));
-    }
-  };
+  let descriptor = TunRegisterRings::new(&mut system_params.SecurityAttributes, ring_size)?;
+  let handle = ObjectHandle::open(adapter)?;
   let mut session = Session::new(descriptor, handle, capacity);
-  cleanupRegion.forget();
   let mut BytesReturned: DWORD = 0;
   if FALSE
     == unsafe {
       DeviceIoControl(
-        session.handle,
+        session.handle.0,
         TUN_IOCTL_REGISTER_RINGS,
         session.descriptor.get_mut_ptr().cast(),
         csizeof!(TunRegisterRings),
@@ -225,30 +323,336 @@ pub(crate) fn WintunStartSession(
     return Err(last_error!("Failed to register rings"));
   }
   session.capacity = capacity;
-  unsafe { InitializeCriticalSectionAndSpinCount(&mut session.recv.lock, LOCK_SPIN_COUNT) };
-  unsafe { InitializeCriticalSectionAndSpinCount(&mut session.send.lock, LOCK_SPIN_COUNT) };
   Ok(session)
 }
 
-impl Drop for Session {
+impl Session {
+  pub fn is_read_avaliable(
+    &self,
+  ) -> std::io::Result<bool> {
+    let read_event = self.GetReadWaitEvent();
+    let res = unsafe { WaitForSingleObject(read_event.0, 0) };
+    match res {
+      WAIT_OBJECT_0 => Ok(true),
+      WAIT_TIMEOUT => Ok(false),
+      WAIT_FAILED => Err(std::io::Error::last_os_error()),
+      other => Err(std::io::Error::new(std::io::ErrorKind::Other, format!("WaitForSingleObject returned: {other}")))
+    }
+  }
+  pub fn block_until_read_avaliable(
+    &self,
+    timeout: Option<std::time::Duration>,
+  ) -> std::io::Result<()> {
+    let read_event = self.GetReadWaitEvent();
+    let millis = timeout
+      .as_ref()
+      .map(std::time::Duration::as_millis)
+      .map(|millis| {
+        if millis > DWORD::MAX as u128 {
+          None
+        } else {
+          Some(millis as DWORD)
+        }
+      })
+      .flatten()
+      .unwrap_or(INFINITE);
+    let res = unsafe { WaitForSingleObject(read_event.0, millis) };
+    match res {
+      WAIT_OBJECT_0 => Ok(()),
+      WAIT_TIMEOUT => Err(std::io::ErrorKind::TimedOut.into()),
+      WAIT_FAILED => Err(std::io::Error::last_os_error()),
+      other => Err(std::io::Error::new(std::io::ErrorKind::Other, format!("WaitForSingleObject returned: {other}")))
+    }
+  }
+  pub fn GetReadWaitEvent(&self) -> &Event {
+    &self.descriptor.send.tail_moved
+  }
+  pub fn GetWriteWaitEvent(&self) -> &Event {
+    &self.descriptor.recv.tail_moved
+  }
+}
+
+#[derive(Debug)]
+pub struct RecvPacket<'a> {
+  data: &'a mut [u8],
+  session: &'a Session,
+}
+
+pub struct RecvPacketRead<'a, 'p>(&'p RecvPacket<'a>, usize);
+
+impl<'a> RecvPacket<'a> {
+  fn new(data: &'a mut [u8], session: &'a Session) -> Self {
+    Self { data, session }
+  }
+  pub fn slice(&self) -> &[u8] {
+    self.data
+  }
+  pub fn mut_slice(&mut self) -> &mut [u8] {
+    self.data
+  }
+  pub fn read<'p>(&'p self) -> RecvPacketRead<'a, 'p> {
+    RecvPacketRead(self, 0)
+  }
+  pub fn release(self) {
+    drop(self)
+  }
+}
+
+impl<'a, 'p> std::io::Read for RecvPacketRead<'a, 'p> {
+  fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+    if self.0.data.len() == self.1 {
+      return Ok(0);
+    }
+    let read = std::cmp::min(buf.len(), self.0.data.len() - self.1);
+    buf[0..read].copy_from_slice(&self.0.data[self.1..self.1 + read]);
+    self.1 += read;
+    Ok(read)
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IoError {
+  AdapterIsTerminating, // Adapter is terminating
+  Exhausted,            // No more data in buffer | buffer is full
+  InvalidData,          // Session buffer is corrupted
+}
+
+impl std::fmt::Display for IoError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str(match self {
+      Self::AdapterIsTerminating => "Adapter is terminating",
+      Self::Exhausted => "No more data in the ring buffer or the buffer is full",
+      Self::InvalidData => "Session ring buffer is corrupted",
+    })
+  }
+}
+
+impl std::error::Error for IoError {}
+
+impl Session {
+  pub fn recv<'a>(&'a self) -> Result<RecvPacket<'a>, IoError> {
+    let guard = unsafe { self.send.lock.enter() };
+    if unsafe { *self.send.head.get() } >= self.capacity {
+      return Err(IoError::AdapterIsTerminating);
+    }
+    let buff_tail = self.descriptor.send.ring().tail.load(Ordering::Acquire);
+    if buff_tail >= self.capacity {
+      return Err(IoError::AdapterIsTerminating);
+    }
+    if unsafe { *self.send.head.get() } == buff_tail {
+      return Err(IoError::Exhausted);
+    }
+    let buff_content = tun_ring_wrap(
+      buff_tail.wrapping_sub(unsafe { *self.send.head.get() }),
+      self.capacity,
+    );
+    if buff_content < csizeof!(TunPacket) {
+      return Err(IoError::InvalidData);
+    }
+    let buff_packet = unsafe {
+      self
+        .descriptor
+        .send
+        .ring_mut()
+        .get_mut(*self.send.head.get())
+    };
+    if buff_packet.size > MAX_IP_PACKET_SIZE {
+      return Err(IoError::InvalidData);
+    }
+    let aligned_packet_size = tun_align(TUN_PACKET_SIZE.wrapping_add(buff_packet.size));
+    if aligned_packet_size > buff_content {
+      return Err(IoError::InvalidData);
+    }
+    let packet_size = buff_packet.size as usize;
+    let packet =
+      unsafe { std::slice::from_raw_parts_mut(buff_packet.data.as_mut_ptr(), packet_size) };
+    unsafe {
+      *self.send.head.get() = tun_ring_wrap(
+        (*self.send.head.get()).wrapping_add(aligned_packet_size),
+        self.capacity,
+      )
+    };
+    unsafe { *self.send.packets_to_release.get() += 1 };
+    guard.leave();
+    Ok(RecvPacket::new(packet, self))
+  }
+}
+
+impl<'a> Drop for RecvPacket<'a> {
   fn drop(&mut self) {
-    WintunEndSession(self)
+    let session = self.session;
+    let guard = unsafe { session.send.lock.enter() };
+    let release_buff_packet: &mut TunPacket = unsafe {
+      &mut *self
+        .data
+        .as_mut_ptr()
+        .offset(-OFFSETOF_TUN_PACKET_DATA)
+        .cast()
+    };
+    release_buff_packet.size |= TUN_PACKET_RELEASE;
+    while unsafe { *session.send.packets_to_release.get() } != 0 {
+      let buff_packet = unsafe {
+        session
+          .descriptor
+          .send
+          .ring()
+          .get(*session.send.head_release.get())
+      };
+      if (buff_packet.size & TUN_PACKET_RELEASE) == 0 {
+        break;
+      }
+      let aligned_packet_size =
+        tun_align(TUN_PACKET_SIZE.wrapping_add(buff_packet.size & !TUN_PACKET_RELEASE));
+      unsafe {
+        *session.send.head_release.get() = tun_ring_wrap(
+          (*session.send.head_release.get()).wrapping_add(aligned_packet_size),
+          session.capacity,
+        )
+      };
+      unsafe { *session.send.packets_to_release.get() -= 1 };
+    }
+    session.descriptor.send.ring().head.store(
+      unsafe { *session.send.head_release.get() },
+      Ordering::Release,
+    );
+    guard.leave();
   }
 }
 
-pub(crate) fn WintunEndSession(session: &mut Session) {
-  unsafe {
-    DeleteCriticalSection(&mut session.send.lock);
-    DeleteCriticalSection(&mut session.recv.lock);
-    CloseHandle(session.handle);
-    VirtualFree(session.descriptor.send.ring.cast(), 0, MEM_RELEASE);
+#[derive(Debug)]
+pub struct SendPacket<'a> {
+  data: &'a mut [u8],
+  session: &'a Session,
+}
+pub struct SendPacketWrite<'a, 'p>(&'p mut SendPacket<'a>, usize);
+
+impl<'a, 'p> std::io::Write for SendPacketWrite<'a, 'p> {
+  fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    if self.0.data.len() == self.1 {
+      return Ok(0);
+    }
+    let written = std::cmp::min(buf.len(), self.0.data.len() - self.1);
+    self.0.data[self.1..self.1 + written].copy_from_slice(&buf[0..written]);
+    self.1 += written;
+    Ok(written)
+  }
+
+  fn flush(&mut self) -> std::io::Result<()> {
+    Ok(())
   }
 }
 
-pub(crate) fn WintunGetReadWaitEvent(session: &Session) -> &Event {
-  &session.descriptor.send.tail_moved
-}
-pub(crate) fn WintunGetWriteWaitEvent(session: &Session) -> &Event {
-  &session.descriptor.recv.tail_moved
+impl<'a> SendPacket<'a> {
+  fn new(data: &'a mut [u8], session: &'a Session) -> Self {
+    Self { data, session }
+  }
+  pub fn slice(&self) -> &[u8] {
+    self.data
+  }
+  pub fn mut_slice(&mut self) -> &mut [u8] {
+    self.data
+  }
+  pub fn write<'p>(&'p mut self) -> SendPacketWrite<'a, 'p> {
+    SendPacketWrite(self, 0)
+  }
+  pub fn send(self) {
+    drop(self)
+  }
 }
 
+impl Session {
+  pub fn allocate<'a>(&'a self, packet_size: DWORD) -> Result<SendPacket<'a>, IoError> {
+    let guard = unsafe { self.recv.lock.enter() };
+    if unsafe { *self.recv.tail.get() } >= self.capacity {
+      return Err(IoError::AdapterIsTerminating);
+    }
+    let aligned_packet_size = tun_align(TUN_PACKET_SIZE.wrapping_add(packet_size));
+    let buff_head = self.descriptor.recv.ring().head.load(Ordering::Acquire);
+    if buff_head >= self.capacity {
+      return Err(IoError::AdapterIsTerminating);
+    }
+    let buff_space = tun_ring_wrap(
+      buff_head
+        .wrapping_sub(unsafe { *self.recv.tail.get() })
+        .wrapping_sub(TUN_ALIGNMENT),
+      self.capacity,
+    );
+    if aligned_packet_size > buff_space {
+      return Err(IoError::Exhausted);
+    }
+    let buff_packet = unsafe {
+      self
+        .descriptor
+        .recv
+        .ring_mut()
+        .get_mut(*self.recv.tail.get())
+    };
+    buff_packet.size = packet_size | TUN_PACKET_RELEASE;
+    let packet = unsafe {
+      std::slice::from_raw_parts_mut(buff_packet.data.as_mut_ptr(), packet_size as usize)
+    };
+    unsafe {
+      *self.recv.tail.get() = tun_ring_wrap(
+        (*self.recv.tail.get()).wrapping_add(aligned_packet_size),
+        self.capacity,
+      )
+    };
+    unsafe { *self.recv.packets_to_release.get() += 1 };
+    guard.leave();
+    Ok(SendPacket::new(packet, self))
+  }
+}
+
+impl<'a> Drop for SendPacket<'a> {
+  fn drop(&mut self) {
+    let session = self.session;
+    let guard = unsafe { session.recv.lock.enter() };
+    let released_buff_packet: &mut TunPacket = unsafe {
+      &mut *self
+        .data
+        .as_mut_ptr()
+        .offset(-OFFSETOF_TUN_PACKET_DATA)
+        .cast()
+    };
+    released_buff_packet.size &= !TUN_PACKET_RELEASE;
+    while unsafe { *session.recv.packets_to_release.get() } != 0 {
+      let buff_packet = unsafe {
+        session
+          .descriptor
+          .recv
+          .ring()
+          .get(*session.recv.tail_release.get())
+      };
+      if buff_packet.size & TUN_PACKET_RELEASE != 0 {
+        break;
+      }
+      let aligned_packet_size = tun_align(TUN_PACKET_SIZE.wrapping_add(buff_packet.size));
+      unsafe {
+        *session.recv.tail_release.get() = tun_ring_wrap(
+          (*session.recv.tail_release.get()).wrapping_add(aligned_packet_size),
+          session.capacity,
+        )
+      };
+      unsafe { *session.recv.packets_to_release.get() -= 1 };
+    }
+    if session.descriptor.recv.ring().tail.load(Ordering::Relaxed)
+      != unsafe { *session.recv.tail_release.get() }
+    {
+      session.descriptor.recv.ring().tail.store(
+        unsafe { *session.recv.tail_release.get() },
+        Ordering::Release,
+      );
+      if session
+        .descriptor
+        .recv
+        .ring()
+        .alertable
+        .load(Ordering::Acquire)
+        != 0
+      {
+        unsafe { SetEvent(session.descriptor.recv.tail_moved.0) };
+      }
+    }
+    guard.leave();
+  }
+}

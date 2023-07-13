@@ -1,3 +1,4 @@
+use std::pin::Pin;
 use std::ptr::null_mut;
 use std::sync::atomic::AtomicBool;
 
@@ -64,6 +65,7 @@ use winapi::um::winnt::{
 use winapi::um::winreg::RegSetValueExW;
 use winapi::DEFINE_GUID;
 
+use crate::RingCapacity;
 use crate::adapter_win7::{create_adapter_post_win7, create_adapter_win7};
 use crate::driver::{DriverInstall, DriverInstallDeferredCleanup};
 use crate::logger::LoggerGetRegistryKeyPath;
@@ -72,6 +74,7 @@ use crate::namespace::SystemNamedMutexLock;
 use crate::nci::SetConnectionName;
 use crate::registry::{RegKey, RegistryQueryDWORD, RegistryQueryString};
 use crate::rundll32::{enable_instance, remove_instance};
+use crate::session::{Session, WintunStartSession};
 use crate::winapi_ext::devquery::{
   DevCloseObjectQuery, DevCreateObjectQuery, _DEV_OBJECT_TYPE_DevObjectTypeDeviceInterface,
   _DEV_QUERY_FLAGS_DevQueryFlagUpdateResults, _DEV_QUERY_RESULT_ACTION_DevQueryResultAdd,
@@ -153,6 +156,9 @@ impl Adapter {
   }
   pub fn get_guid(&self) -> GUID{
     self.CfgInstanceID
+  }
+  pub fn start_session(&mut self, capacity: RingCapacity) -> std::io::Result<Pin<Box<Session>>> {
+    WintunStartSession(self, capacity.0)
   }
 }
 

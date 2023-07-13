@@ -1,10 +1,10 @@
-use chrono::offset::Utc;
+use chrono::offset::Local;
 use chrono::DateTime;
 use std::time::SystemTime;
 use wtun::*;
 
 fn logger(level: LogLevel, timestamp: SystemTime, message: core::fmt::Arguments) {
-  let timestamp: DateTime<Utc> = timestamp.into();
+  let timestamp: DateTime<Local> = timestamp.into();
   eprintln!(
     "[{:?}] [{}] {}",
     level,
