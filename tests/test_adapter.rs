@@ -1,6 +1,5 @@
 use chrono::offset::Local;
 use chrono::DateTime;
-use std::pin::Pin;
 use std::time::SystemTime;
 use wtun::*;
 
@@ -18,7 +17,7 @@ fn logger(level: LogLevel, timestamp: SystemTime, message: core::fmt::Arguments)
 fn creates_adapter() {
   set_logger(logger);
   let test_guid = None;
-  let _adapter: Pin<Box<Adapter>> = Adapter::create("test", "test type", test_guid).unwrap();
+  let _adapter = Adapter::create("test", "test type", test_guid).unwrap();
 }
 
 #[test]
@@ -30,14 +29,14 @@ fn creates_adapter_and_opens() {
     Data3: 0xbeef,
     Data4: [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef],
   });
-  let _adapter : Pin<Box<Adapter>>= Adapter::create("test", "test type", test_guid).unwrap();
+  let _adapter = Adapter::create("test", "test type", test_guid).unwrap();
   let _adapter1 = Adapter::open("test").unwrap();
 }
 
 #[test]
 fn creates_adapter_and_sets_ipv4() {
   set_logger(logger);
-  let mut adapter: Pin<Box<Adapter>> = Adapter::create("test", "test type", None).unwrap();
+  let mut adapter = Adapter::create("test", "test type", None).unwrap();
   loop {
     match adapter.set_ip_address(ip_mask!(192.168.10.1/24)) {
       Ok(_) => break,
@@ -50,7 +49,7 @@ fn creates_adapter_and_sets_ipv4() {
 #[test]
 fn creates_adapter_and_sets_ipv6() {
   set_logger(logger);
-  let mut adapter: Pin<Box<Adapter>> = Adapter::create("test", "test type", None).unwrap();
+  let mut adapter = Adapter::create("test", "test type", None).unwrap();
   loop {
     match adapter.set_ip_address(ip_mask!(fe80: : : :b321:fb01:9ad8:e6e6/17)) {
       Ok(_) => break,
@@ -64,7 +63,7 @@ fn creates_adapter_and_sets_ipv6() {
 #[test]
 fn creates_adapter_and_sets_both_ip() {
   set_logger(logger);
-  let mut adapter: Pin<Box<Adapter>> = Adapter::create("test", "test type", None).unwrap();
+  let mut adapter = Adapter::create("test", "test type", None).unwrap();
   loop {
     match adapter.set_ip_address(ip_mask!(192.168.10.1/24)) {
       Ok(_) => break,

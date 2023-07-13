@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::ptr::null_mut;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -130,16 +129,16 @@ pub struct Adapter {
 unsafe impl Sync for Adapter {}
 unsafe impl Send for Adapter {}
 
-pub trait ConstructsAndProvidesAdapter: Unpin {
+pub trait ConstructsAndProvidesAdapter {
   type MutRef<'a>: std::ops::DerefMut<Target = Adapter> where Self: 'a;
   fn construct(adapter: Adapter) -> Self;
   fn provide<'a, 'this>(&'this mut self) -> Self::MutRef<'a> where 'this: 'a;
 }
 
-impl ConstructsAndProvidesAdapter for Pin<Box<Adapter>> {
+impl ConstructsAndProvidesAdapter for Box<Adapter> {
   type MutRef<'a> = &'a mut Adapter;
   fn construct(adapter: Adapter) -> Self {
-    Box::pin(adapter)
+    Box::new(adapter)
   }
 
   fn provide<'a, 'this>(&'this mut self) -> Self::MutRef<'a> where 'this: 'a {
@@ -147,10 +146,10 @@ impl ConstructsAndProvidesAdapter for Pin<Box<Adapter>> {
   }
 }
 
-impl ConstructsAndProvidesAdapter for Pin<Arc<Mutex<Adapter>>> {
+impl ConstructsAndProvidesAdapter for Arc<Mutex<Adapter>> {
   type MutRef<'a> = std::sync::MutexGuard<'a, Adapter>;
   fn construct(adapter: Adapter) -> Self {
-    Arc::pin(Mutex::new(adapter))
+    Arc::new(Mutex::new(adapter))
   }
 
   fn provide<'a, 'this>(&'this mut self) -> Self::MutRef<'a> where 'this: 'a {
@@ -158,10 +157,10 @@ impl ConstructsAndProvidesAdapter for Pin<Arc<Mutex<Adapter>>> {
   }
 }
 
-impl ConstructsAndProvidesAdapter for Pin<std::rc::Rc<std::cell::RefCell<Adapter>>> {
+impl ConstructsAndProvidesAdapter for std::rc::Rc<std::cell::RefCell<Adapter>> {
   type MutRef<'a> = std::cell::RefMut<'a, Adapter>;
   fn construct(adapter: Adapter) -> Self {
-    std::rc::Rc::pin(std::cell::RefCell::new(adapter))
+    std::rc::Rc::new(std::cell::RefCell::new(adapter))
   }
 
   fn provide<'a,'this>(&'this mut self) -> Self::MutRef<'a> where 'this: 'a {
@@ -174,7 +173,7 @@ impl Adapter {
     name: &str,
     tunnel_type: &str,
     requested_guid: Option<GUID>,
-  ) -> std::io::Result<Pin<Box<Adapter>>> {
+  ) -> std::io::Result<Box<Adapter>> {
     let name: StaticWideCStr<MAX_ADAPTER_NAME> = cutils::strings::encode(name).ok_or(
       std::io::Error::new(std::io::ErrorKind::InvalidInput, "Tunnel name is too long"),
     )?;
@@ -200,7 +199,7 @@ impl Adapter {
       ))?;
     WintunCreateAdapter(&name, &tunnel_type, requested_guid)
   }
-  pub fn open(name: &str) -> std::io::Result<Pin<Box<Adapter>>> {
+  pub fn open(name: &str) -> std::io::Result<Box<Adapter>> {
     let name: StaticWideCStr<MAX_ADAPTER_NAME> = cutils::strings::encode(name).ok_or(
       std::io::Error::new(std::io::ErrorKind::InvalidInput, "Tunnel name is too long"),
     )?;
@@ -214,7 +213,7 @@ impl Adapter {
     )?;
     WintunOpenAdapter(&name)
   }
-  pub fn close(self: Pin<Box<Adapter>>) {
+  pub fn close(self: Box<Adapter>) {
     drop(self)
   }
   pub fn get_luid(&self) -> NET_LUID {
@@ -223,7 +222,7 @@ impl Adapter {
   pub fn get_guid(&self) -> GUID {
     self.CfgInstanceID
   }
-  pub fn start_session(&mut self, capacity: RingCapacity) -> std::io::Result<Pin<Box<Session>>> {
+  pub fn start_session(&mut self, capacity: RingCapacity) -> std::io::Result<Box<Session>> {
     WintunStartSession(self, capacity.0)
   }
   pub fn start_session_wrapped<T: ConstrunctsAndProvidesSession>(&mut self, capacity: RingCapacity) -> std::io::Result<T> {

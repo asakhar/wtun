@@ -1,7 +1,6 @@
 use chrono::offset::Local;
 use chrono::DateTime;
 use std::io::Write;
-use std::pin::Pin;
 use std::time::SystemTime;
 use wtun::*;
 
@@ -61,7 +60,7 @@ fn make_icmp<'a, 'p>(mut packet: SendPacketWrite<'a, 'p>) {
 #[test]
 fn creates_session() {
   set_logger(logger);
-  let mut adapter: Pin<Box<Adapter>> = Adapter::create("test", "test type", None).unwrap();
+  let mut adapter = Adapter::create("test", "test type", None).unwrap();
   let session = adapter
     .start_session(ring_capacity!(MAX_RING_CAPACITY))
     .unwrap();
@@ -70,7 +69,7 @@ fn creates_session() {
 #[test]
 fn creates_and_sends() {
   set_logger(logger);
-  let mut adapter: Pin<Box<Adapter>> = Adapter::create("test", "test type", None).unwrap();
+  let mut adapter = Adapter::create("test", "test type", None).unwrap();
   let session = adapter
     .start_session(ring_capacity!(MAX_RING_CAPACITY))
     .unwrap();
@@ -83,7 +82,7 @@ fn creates_and_sends() {
 #[test]
 fn creates_and_recvs() {
   set_logger(logger);
-  let mut adapter: Pin<Box<Adapter>> = Adapter::create("test", "test type", None).unwrap();
+  let mut adapter = Adapter::create("test", "test type", None).unwrap();
   let session = adapter
     .start_session(ring_capacity!(MAX_RING_CAPACITY))
     .unwrap();
@@ -97,7 +96,7 @@ fn creates_and_recvs() {
 #[test]
 fn creates_and_sends_alerts() {
   set_logger(logger);
-  let mut adapter: Pin<Box<Adapter>> = Adapter::create("test", "test type", None).unwrap();
+  let mut adapter = Adapter::create("test", "test type", None).unwrap();
   let session = adapter
     .start_session(ring_capacity!(MIN_RING_CAPACITY))
     .unwrap();

@@ -1,6 +1,5 @@
 use std::{
   cell::UnsafeCell,
-  pin::Pin,
   ptr::null_mut,
   sync::{atomic::Ordering, Arc},
 };
@@ -285,23 +284,23 @@ impl ObjectHandle {
   }
 }
 
-pub trait ConstrunctsAndProvidesSession: std::ops::Deref<Target = Session> + Unpin {
+pub trait ConstrunctsAndProvidesSession: std::ops::Deref<Target = Session> {
   fn construct(session: Session) -> Self;
 }
 
-impl ConstrunctsAndProvidesSession for Pin<Arc<Session>> {
+impl ConstrunctsAndProvidesSession for Arc<Session> {
   fn construct(session: Session) -> Self {
-    Arc::pin(session)
+    Arc::new(session)
   }
 }
-impl ConstrunctsAndProvidesSession for Pin<Box<Session>> {
+impl ConstrunctsAndProvidesSession for Box<Session> {
   fn construct(session: Session) -> Self {
-    Box::pin(session)
+    Box::new(session)
   }
 }
-impl ConstrunctsAndProvidesSession for Pin<std::rc::Rc<Session>> {
+impl ConstrunctsAndProvidesSession for std::rc::Rc<Session> {
   fn construct(session: Session) -> Self {
-    std::rc::Rc::pin(session)
+    std::rc::Rc::new(session)
   }
 }
 
@@ -333,20 +332,8 @@ impl Session {
     descriptor: TunRegisterRings,
     handle: ObjectHandle,
     capacity: ULONG,
-  ) -> Pin<Box<Self>> {
-    let recv = SessionRecv::default();
-    let send = SessionSend::default();
-    let mut session = Box::pin(Self {
-      descriptor,
-      handle,
-      capacity,
-      recv,
-      send,
-      recv_tail_moved,
-    });
-    unsafe { session.recv.lock.init() };
-    unsafe { session.send.lock.init() };
-    session
+  ) -> Box<Self> {
+    Self::new_wrapped(recv_tail_moved, descriptor, handle, capacity)
   }
   fn new_wrapped<T: ConstrunctsAndProvidesSession>(
     recv_tail_moved: Event,
@@ -372,7 +359,7 @@ impl Session {
     drop(session_mut);
     session
   }
-  pub fn close(self: Pin<Box<Session>>) {
+  pub fn close(self: Box<Session>) {
     drop(self)
   }
 }
