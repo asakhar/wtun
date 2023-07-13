@@ -131,7 +131,7 @@ impl Adapter {
     name: &str,
     tunnel_type: &str,
     requested_guid: Option<GUID>,
-  ) -> std::io::Result<Adapter> {
+  ) -> std::io::Result<Pin<Box<Adapter>>> {
     let name: StaticWideCStr<MAX_ADAPTER_NAME> = cutils::strings::encode(name).ok_or(
       std::io::Error::new(std::io::ErrorKind::InvalidInput, "Tunnel name is too long"),
     )?;
@@ -142,7 +142,7 @@ impl Adapter {
       ))?;
     WintunCreateAdapter(&name, &tunnel_type, requested_guid)
   }
-  pub fn open(name: &str) -> std::io::Result<Adapter> {
+  pub fn open(name: &str) -> std::io::Result<Pin<Box<Adapter>>> {
     let name: StaticWideCStr<MAX_ADAPTER_NAME> = cutils::strings::encode(name).ok_or(
       std::io::Error::new(std::io::ErrorKind::InvalidInput, "Tunnel name is too long"),
     )?;
@@ -172,7 +172,7 @@ pub fn WintunCreateAdapter(
   name: &StaticWideCStr<MAX_ADAPTER_NAME>,
   tunnel_type: &StaticWideCStr<MAX_ADAPTER_NAME>,
   requested_guid: Option<GUID>,
-) -> std::io::Result<Adapter> {
+) -> std::io::Result<Pin<Box<Adapter>>> {
   let _system_params = unsafe { get_system_params() };
   unsafe_defer! { cleanup <-
     QueueUpOrphanedDeviceCleanupRoutine();
@@ -183,7 +183,7 @@ pub fn WintunCreateAdapter(
   };
   let (dev_info_existing_adapters, mut existing_adapters) = DriverInstall()?; // cleanupDeviceInstallationMutex
   info!("Creating adapter");
-  let mut adapter = Adapter {
+  let mut adapter = Box::pin(Adapter {
     InterfaceFilename: Default::default(),
     DevInstanceID: Default::default(),
     SwDevice: null_mut(),
@@ -193,11 +193,11 @@ pub fn WintunCreateAdapter(
     LuidIndex: 0,
     IfType: 0,
     IfIndex: 0,
-  };
+  });
   unsafe_defer! { cleanupDriverInstall <-
     DriverInstallDeferredCleanup(dev_info_existing_adapters, &mut existing_adapters);
   };
-  let adapter_ptr = adapter.get_mut_ptr();
+  let adapter_ptr = (*adapter).get_mut_ptr();
   unsafe_defer! { cleanupAdapter <-
     WintunCloseAdapter(&mut *adapter_ptr)
   };
@@ -580,7 +580,7 @@ fn WintunCreateAdapterStub(
   adapter.SwDevice = null_mut();
   Ok(())
 }
-pub fn WintunOpenAdapter(Name: &WideCStr) -> std::io::Result<Adapter> {
+pub fn WintunOpenAdapter(Name: &WideCStr) -> std::io::Result<Pin<Box<Adapter>>> {
   unsafe { get_system_params() };
   unsafe_defer! { cleanup <-
     QueueUpOrphanedDeviceCleanupRoutine();
@@ -589,7 +589,7 @@ pub fn WintunOpenAdapter(Name: &WideCStr) -> std::io::Result<Adapter> {
     Ok(res) => res,
     Err(err) => return Err(error!(err, "Failed to take device installation mutex")), // cleanup
   };
-  let mut adapter = Adapter {
+  let mut adapter = Box::pin(Adapter {
     InterfaceFilename: Default::default(),
     DevInstanceID: Default::default(),
     SwDevice: null_mut(),
@@ -599,7 +599,7 @@ pub fn WintunOpenAdapter(Name: &WideCStr) -> std::io::Result<Adapter> {
     LuidIndex: 0,
     IfType: 0,
     IfIndex: 0,
-  };
+  });
   info!("Opening adapter: {}", Name.display());
   let adapter_ptr = adapter.get_mut_ptr();
   unsafe_defer! { cleanupAdapter <-

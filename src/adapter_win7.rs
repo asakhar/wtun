@@ -168,9 +168,8 @@ pub fn create_adapter_win7(
   let native_machine = unsafe { get_system_params().NativeMachine };
   #[cfg(feature = "wow64_support")]
   if native_machine != IMAGE_FILE_PROCESS {
-    if let Err(err) = create_instance(&mut adapter.DevInstanceID) {
-      return Err(error!(err, "Failed to create device instance"));
-    }
+    adapter.DevInstanceID =
+      create_instance().map_err(|err| error!(err, "Failed to create device instance"))?;
     unsafe_defer! { cleanupDevInfo <-
       SetupDiDestroyDeviceInfoList(dev_info);
     }

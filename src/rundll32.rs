@@ -1,11 +1,6 @@
 use std::io::{BufRead, Read};
 
-use cutils::{
-  defer,
-  files::get_windows_dir_path,
-  inspection::GetPtrExt,
-  strings::{StaticWideCStr, WideCStr},
-};
+use cutils::{defer, files::get_windows_dir_path, inspection::GetPtrExt, strings::StaticWideCStr};
 use get_last_error::Win32Error;
 use winapi::{
   shared::{
@@ -15,6 +10,7 @@ use winapi::{
   um::{
     cfgmgr32::MAX_DEVICE_ID_LEN,
     setupapi::{SetupDiGetDeviceInstanceIdW, HDEVINFO, SP_DEVINFO_DATA},
+    winnt::{IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM64},
   },
 };
 
@@ -42,14 +38,10 @@ pub(crate) fn disable_instance(
 ) -> std::io::Result<()> {
   invoke_class_installer("disable", "DisableInstance", dev_info, dev_info_data)
 }
-pub(crate) fn create_instance(
-  instance_id: &mut WideCStr,
-) -> std::io::Result<StaticWideCStr<MAX_DEVICE_ID_LEN>> {
+pub(crate) fn create_instance() -> std::io::Result<StaticWideCStr<MAX_DEVICE_ID_LEN>> {
   info!("Spawning native process to create instance");
-  let response = match execute_rundll32("CreateInstanceWin7", &[]) {
-    Ok(res) => res,
-    Err(err) => return Err(error!(err, "Error executing worker process")),
-  };
+  let response = execute_rundll32("CreateInstanceWin7", &[])
+    .map_err(|err| error!(err, "Error executing worker process"))?;
   let error_bytes: [u8; 4] = response.as_slice().try_into().ok().ok_or(error!(
     ERROR_INVALID_PARAMETER,
     "Incomplete response: {:?}", response
@@ -59,15 +51,16 @@ pub(crate) fn create_instance(
     return Err(std::io::Error::from_raw_os_error(error as i32));
   }
   use std::str::from_utf8;
-  from_utf8(&response[4..]).ok().map(StaticWideCStr::<MAX_DEVICE_ID_LEN>::encode).flatten().ok_or(error!(
-    ERROR_INVALID_PARAMETER,
-    "Invalid response: {:?}", response
-  ))
+  from_utf8(&response[4..])
+    .ok()
+    .map(StaticWideCStr::<MAX_DEVICE_ID_LEN>::encode)
+    .flatten()
+    .ok_or(error!(
+      ERROR_INVALID_PARAMETER,
+      "Invalid response: {:?}", response
+    ))
 }
-fn execute_rundll32<'a>(
-  function: &str,
-  arguments: &[&str],
-) -> std::io::Result<Vec<u8>> {
+fn execute_rundll32<'a>(function: &str, arguments: &[&str]) -> std::io::Result<Vec<u8>> {
   let windows_dir_path = match get_windows_dir_path() {
     Ok(res) => res,
     Err(err) => return Err(error!(err, "Failed to get Windows folder")),
@@ -104,12 +97,9 @@ fn execute_rundll32<'a>(
     ));
   }
   let arg = format!("{},{}", dll_path.display(), function);
-  let args = std::iter::once(arg.as_str())
-  .chain(arguments.iter().copied());
+  let args = std::iter::once(arg.as_str()).chain(arguments.iter().copied());
   let mut proc = match std::process::Command::new(rundll32_path)
-    .args(
-      args,
-    )
+    .args(args)
     .stderr(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
     .spawn()
@@ -132,7 +122,7 @@ fn execute_rundll32<'a>(
       b'+' => crate::logger::LogLevel::Info,
       b'-' => crate::logger::LogLevel::Warning,
       b'!' => crate::logger::LogLevel::Error,
-      _ => return Err(std::io::ErrorKind::InvalidData.into())
+      _ => return Err(std::io::ErrorKind::InvalidData.into()),
     };
     let mut buf = [0; 8];
     stderr.read_exact(&mut buf)?;
@@ -186,15 +176,8 @@ fn invoke_class_installer(
     return Err(last_error!("Failed to get adapter instance ID"));
   }
   let instance_id = instance_id.display().to_string();
-  let response = match execute_rundll32(function, &[instance_id.as_str()]) {
-    Ok(res) => res,
-    Err(err) => {
-      return Err(error!(
-        err,
-        "Error executing worker process: {}", instance_id
-      ))
-    }
-  };
+  let response = execute_rundll32(function, &[instance_id.as_str()])
+    .map_err(|err| error!(err, "Error executing worker process: {}", instance_id))?;
   let error_bytes: [u8; 4] = response.as_slice().try_into().ok().ok_or(error!(
     ERROR_INVALID_PARAMETER,
     "Incomplete response: {:?}", response

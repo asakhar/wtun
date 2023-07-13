@@ -1,8 +1,7 @@
-use std::{cell::UnsafeCell, marker::PhantomData};
+use std::cell::UnsafeCell;
 
 use cutils::{inspection::GetPtrExt, strings::WideCStr, unsafe_defer, widecstr};
 use get_last_error::Win32Error;
-use lazy_static::lazy_static;
 use winapi::{
   shared::{
     minwindef::{BYTE, DWORD, FALSE},

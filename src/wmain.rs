@@ -197,8 +197,8 @@ fn EnvInit() -> (bool, bool, USHORT) {
       NativeMachine: *mut USHORT,
     ) -> winapi::shared::minwindef::BOOL;
     let mut ProcessMachine: USHORT = 0;
-    let mut kernel32 = unsafe { GetModuleHandleW(widecstr!("kernel32.dll").as_ptr()) };
-    let mut get_native_machine = || {
+    let kernel32 = unsafe { GetModuleHandleW(widecstr!("kernel32.dll").as_ptr()) };
+    let get_native_machine = || {
       let mut IsWoW64: BOOL = FALSE;
       let cond = unsafe { IsWow64Process(GetCurrentProcess(), IsWoW64.get_mut_ptr()) } == TRUE
         && IsWoW64 == TRUE;

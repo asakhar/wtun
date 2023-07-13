@@ -1,8 +1,9 @@
 use cutils::{
-  check_handle, defer,
+  check_handle, csizeof, defer,
   inspection::{CastToMutVoidPtrExt, GetPtrExt, InitZeroed},
+  static_widecstr,
   strings::{WideCStr, WideCString},
-  unsafe_defer, wide_array, widecstr, widecstring, csizeof,
+  unsafe_defer, wide_array, widecstr, widecstring,
 };
 use get_last_error::Win32Error;
 use winapi::{
@@ -41,7 +42,7 @@ use crate::{
   },
   logger::{error, info, last_error, log, warn},
   namespace::SystemNamedMutexLock,
-  ntdll::{SystemModuleInformation, PRTL_PROCESS_MODULES},
+  ntdll::{SystemModuleInformation, RTL_PROCESS_MODULES},
   resource::{copy_to_file, create_temp_dir, ResId},
   winapi_ext::{
     shlwapi::PathFindFileNameW,
@@ -77,15 +78,15 @@ fn DisableAllOurAdapters(
       continue;
     }
     let mut prop_type = unsafe { DEVPROPTYPE::init_zeroed() };
-    let mut name = wide_array!["<unknown>"; MAX_ADAPTER_NAME];
+    let mut name = static_widecstr!["<unknown>"; MAX_ADAPTER_NAME];
     unsafe {
       SetupDiGetDevicePropertyW(
         DevInfo,
         device.get_mut_ptr(),
         DEVPKEY_Wintun_Name.get_const_ptr(),
         prop_type.get_mut_ptr(),
-        name.as_ptr() as *mut _,
-        std::mem::size_of_val(&name) as DWORD,
+        name.as_mut_ptr().cast(),
+        name.capacity(),
         std::ptr::null_mut(),
         0,
       )
@@ -131,15 +132,15 @@ fn EnableAllOurAdapters(
   let mut overall_result = Ok(());
   for device in AdaptersToEnable {
     let mut prop_type = unsafe { DEVPROPTYPE::init_zeroed() };
-    let mut name = wide_array!["<unknown>"; MAX_ADAPTER_NAME];
+    let mut name = static_widecstr!["<unknown>"; MAX_ADAPTER_NAME];
     unsafe {
       SetupDiGetDevicePropertyW(
         DevInfo,
         device.get_mut_ptr(),
         DEVPKEY_Wintun_Name.get_const_ptr(),
         prop_type.get_mut_ptr(),
-        name.as_ptr() as *mut _,
-        std::mem::size_of_val(&name) as DWORD,
+        name.as_mut_ptr().cast(),
+        name.capacity(),
         std::ptr::null_mut(),
         0,
       )
@@ -199,17 +200,10 @@ fn VersionOfFile(filename: &WideCStr) -> std::io::Result<DWORD> {
   }
 
   let mut version_info = vec![0u8; len as usize];
-  let mut version = 0;
   let mut fixed_info = std::ptr::null_mut();
   let mut fixed_info_len = std::mem::size_of::<VS_FIXEDFILEINFO>() as UINT;
-  if unsafe {
-    GetFileVersionInfoW(
-      filename.as_ptr(),
-      0,
-      len,
-      version_info.as_mut_ptr().cast_to_pvoid(),
-    )
-  } == FALSE
+  if unsafe { GetFileVersionInfoW(filename.as_ptr(), 0, len, version_info.as_mut_ptr().cast()) }
+    == FALSE
   {
     return Err(last_error!(
       "Failed to get {} version info",
@@ -230,20 +224,24 @@ fn VersionOfFile(filename: &WideCStr) -> std::io::Result<DWORD> {
       filename.display()
     ));
   }
-  let fixed_info = unsafe { &mut *(fixed_info as *mut VS_FIXEDFILEINFO) };
-  version = fixed_info.dwFileVersionMS;
+  let fixed_info: &mut VS_FIXEDFILEINFO = unsafe { &mut *(fixed_info.cast()) };
+  let version = fixed_info.dwFileVersionMS;
   if version == 0 {
     log!(
       crate::logger::LogLevel::Warning,
       "Determined version of {}, but was v0.0, so returning failure",
       filename.display()
     );
-    return Err(std::io::Error::from_raw_os_error(ERROR_VERSION_PARSE_ERROR as i32));
+    return Err(std::io::Error::from_raw_os_error(
+      ERROR_VERSION_PARSE_ERROR as i32,
+    ));
   }
   Ok(version)
 }
 
-fn MaybeGetRunningDriverVersion(ReturnOneIfRunningInsteadOfVersion: bool) -> std::io::Result<DWORD> {
+fn MaybeGetRunningDriverVersion(
+  ReturnOneIfRunningInsteadOfVersion: bool,
+) -> std::io::Result<DWORD> {
   let mut buffer_size: DWORD = 128 * 1024;
   let mut modules_buf = vec![0u64; (buffer_size / 8) as usize];
   loop {
@@ -267,8 +265,7 @@ fn MaybeGetRunningDriverVersion(ReturnOneIfRunningInsteadOfVersion: bool) -> std
       "Failed to enumerate drivers"
     ));
   }
-  let modules = unsafe { &mut *(modules_buf.as_ptr() as PRTL_PROCESS_MODULES) };
-  let mut version = 0;
+  let modules: &mut RTL_PROCESS_MODULES = unsafe { &mut *(modules_buf.as_mut_ptr().cast()) };
   for i in (1..modules.number()).rev() {
     let module = unsafe { modules.get_mut(i) };
     let Some(nt_filename) = module.filename() else {
@@ -288,7 +285,9 @@ fn MaybeGetRunningDriverVersion(ReturnOneIfRunningInsteadOfVersion: bool) -> std
       return VersionOfFile(filepath.as_ref());
     }
   }
-  Err(std::io::Error::from_raw_os_error(ERROR_FILE_NOT_FOUND as i32))
+  Err(std::io::Error::from_raw_os_error(
+    ERROR_FILE_NOT_FOUND as i32,
+  ))
 }
 
 pub fn get_running_driver_version() -> std::io::Result<DWORD> {
@@ -314,7 +313,10 @@ pub fn DriverInstallDeferredCleanup(
   ExistingAdapters: &mut SP_DEVINFO_DATA_LIST,
 ) {
   if !ExistingAdapters.is_empty() {
-    drop(EnableAllOurAdapters(DevInfoExistingAdapters, ExistingAdapters));
+    drop(EnableAllOurAdapters(
+      DevInfoExistingAdapters,
+      ExistingAdapters,
+    ));
     ExistingAdapters.clear();
   }
   if check_handle(DevInfoExistingAdapters) {
@@ -542,6 +544,8 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
   if result == FALSE {
     last_error!("Could not install driver {} to store", inf_path.display());
   }
+  cleanupDelete.run();
+  cleanupDirectory.run();
   cleanupExistingAdapters.forget();
   cleanupDevInfo.run();
   DriverInstallationLock.release();
