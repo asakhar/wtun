@@ -372,6 +372,9 @@ impl Session {
     drop(session_mut);
     session
   }
+  pub fn close(self: Pin<Box<Session>>) {
+    drop(self)
+  }
 }
 
 pub(crate) fn WintunStartSession<T: ConstrunctsAndProvidesSession>(
