@@ -4,7 +4,7 @@ use crate::{
   adapter::AdapterOpenDeviceObject,
   logger::{error, last_error},
   wmain::get_system_params,
-  Adapter, MAX_IP_PACKET_SIZE,
+  Adapter, MAX_IP_PACKET_SIZE, PacketSize,
 };
 use cutils::{check_handle, csizeof, inspection::GetPtrExt, unsafe_defer};
 use winapi::{
@@ -355,6 +355,12 @@ pub(crate) fn WintunStartSession(
 }
 
 impl Session {
+  pub fn capacity(&self) -> ULONG {
+    self.capacity
+  }
+  pub fn ring_size(&self) -> usize {
+    tun_ring_size(self.capacity)
+  }
   pub fn is_write_avaliable(&self) -> std::io::Result<bool> {
     let read_event = self.GetWriteWaitEvent();
     let res = unsafe { WaitForSingleObject(read_event.0, 0) };
@@ -634,7 +640,8 @@ impl<'a> SendPacket<'a> {
 }
 
 impl Session {
-  pub fn allocate<'a>(&'a self, packet_size: DWORD) -> Result<SendPacket<'a>, IoError> {
+  pub fn allocate<'a>(&'a self, packet_size: PacketSize) -> Result<SendPacket<'a>, IoError> {
+    let packet_size = packet_size.inner();
     let guard = unsafe { self.recv.lock.enter() };
     if unsafe { *self.recv.tail.get() } >= self.capacity {
       return Err(IoError::AdapterIsTerminating);

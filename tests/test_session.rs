@@ -69,7 +69,7 @@ fn creates_and_sends() {
   set_logger(logger);
   let mut adapter = Adapter::create("test", "test type", None).unwrap();
   let session = adapter.start_session(ring_capacity!(MAX_RING_CAPACITY)).unwrap();
-  let mut packet = session.allocate(123).unwrap();
+  let mut packet = session.allocate(packet_size!(28)).unwrap();
   let packet_write = packet.write();
   make_icmp(packet_write);
   packet.send();
@@ -89,9 +89,20 @@ fn creates_and_recvs() {
 fn creates_and_sends_alerts() {
   set_logger(logger);
   let mut adapter = Adapter::create("test", "test type", None).unwrap();
-  let session = adapter.start_session(ring_capacity!(MAX_RING_CAPACITY)).unwrap();
-  let mut packet = session.allocate(123).unwrap();
-  let packet_write = packet.write();
-  make_icmp(packet_write);
-  packet.send();
+  let session = adapter.start_session(ring_capacity!(MIN_RING_CAPACITY)).unwrap();
+  assert_eq!(session.is_write_avaliable().unwrap(), true);
+  for _ in 0.. {
+    while session.is_write_avaliable().unwrap() {}
+    let mut packet = match session.allocate(packet_size!(MAX_IP_PACKET_SIZE)) {
+      Ok(packet) => packet,
+      Err(err) if err == IoError::Exhausted => {
+        break;
+      },
+      err => err.unwrap(),
+    };
+    let packet_write = packet.write();
+    make_icmp(packet_write);
+    packet.send();
+  }
+  assert_ne!(session.is_write_avaliable().unwrap(), true);
 }
