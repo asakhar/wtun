@@ -52,7 +52,7 @@ use crate::{
   },
   logger::{error, info, last_error, IntoError},
   registry::RegKey,
-  rundll32::create_instance,
+  rundll32::*,
   wmain::{get_system_params, IMAGE_FILE_PROCESS},
 };
 
@@ -166,7 +166,7 @@ pub fn create_adapter_win7(
   };
   let dev_info_data_ptr = dev_info_data.get_mut_ptr();
   let native_machine = unsafe { get_system_params().NativeMachine };
-  #[cfg(feature = "wow64_support")]
+  #[cfg(any(target_arch = "x86", target_arch = "arm", target_arch = "x86_64"))]
   if native_machine != IMAGE_FILE_PROCESS {
     adapter.DevInstanceID =
       create_instance().map_err(|err| error!(err, "Failed to create device instance"))?;
@@ -187,7 +187,7 @@ pub fn create_adapter_win7(
     }
     cleanupDevInfo.forget();
   }
-  if cfg!(not(feature = "wow64_support")) || native_machine != IMAGE_FILE_PROCESS {
+  if cfg!(not(any(target_arch = "x86", target_arch = "arm", target_arch = "x86_64"))) || native_machine != IMAGE_FILE_PROCESS {
     init_instance_not_wow64(dev_info, tunnel_type, dev_info_data_ptr)?;
   }
   unsafe_defer! { cleanupDevInfo <-

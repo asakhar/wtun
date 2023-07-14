@@ -14,7 +14,10 @@ mod nci;
 mod ntdll;
 mod registry;
 mod resource;
+#[cfg(any(target_arch = "x86", target_arch = "arm", target_arch = "x86_64"))]
 mod rundll32;
+#[cfg(not(any(target_arch = "x86", target_arch = "arm", target_arch = "x86_64")))]
+mod rundll32 {}
 mod session;
 mod winapi_ext;
 mod wintun_inf;

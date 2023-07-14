@@ -72,19 +72,17 @@ use crate::logger::{error, info, last_error, log};
 use crate::namespace::SystemNamedMutexLock;
 use crate::nci::SetConnectionName;
 use crate::registry::{RegKey, RegistryQueryDWORD, RegistryQueryString};
-use crate::rundll32::{enable_instance, remove_instance};
-use crate::session::{Session, WintunStartSession, ConstrunctsAndProvidesSession};
+use crate::rundll32::*;
+use crate::session::{ConstrunctsAndProvidesSession, Session, WintunStartSession};
 use crate::winapi_ext::devquery::{
-  DevCloseObjectQuery, DevCreateObjectQuery, _DEV_OBJECT_TYPE_DevObjectTypeDeviceInterface,
-  _DEV_QUERY_FLAGS_DevQueryFlagUpdateResults, _DEV_QUERY_RESULT_ACTION_DevQueryResultAdd,
-  _DEV_QUERY_RESULT_ACTION_DevQueryResultStateChange,
-  _DEV_QUERY_RESULT_ACTION_DevQueryResultUpdate, _DEV_QUERY_STATE_DevQueryStateAborted,
-  DEVPROP_FILTER_EXPRESSION, DEV_QUERY_RESULT_ACTION_DATA, HDEVQUERY,
-  _DEVPROP_OPERATOR_DEVPROP_OPERATOR_EQUALS, _DEVPROP_OPERATOR_DEVPROP_OPERATOR_EQUALS_IGNORE_CASE,
+  DevCloseObjectQuery, DevCreateObjectQuery, DEVPROP_FILTER_EXPRESSION,
+  DEVPROP_OPERATOR::{EQUALS, EQUALS_IGNORE_CASE},
+  DEV_QUERY_FLAGS, DEV_QUERY_RESULT_ACTION_DATA, HDEVQUERY,
 };
+use crate::winapi_ext::devquery::{DEV_OBJECT_TYPE, DEV_QUERY_RESULT_ACTION, DEV_QUERY_STATE};
 use crate::winapi_ext::swdevice::{
-  SwDeviceClose, SwDeviceCreate, _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesDriverRequired,
-  _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesSilentInstall, HSWDEVICE, SW_DEVICE_CREATE_INFO,
+  SwDeviceClose, SwDeviceCreate, HSWDEVICE, DriverRequired,
+  SilentInstall, SW_DEVICE_CREATE_INFO,
 };
 use crate::winapi_ext::winternl::RtlNtStatusToDosError;
 use crate::wmain::{get_system_params, IMAGE_FILE_PROCESS};
@@ -130,9 +128,13 @@ unsafe impl Sync for Adapter {}
 unsafe impl Send for Adapter {}
 
 pub trait ConstructsAndProvidesAdapter {
-  type MutRef<'a>: std::ops::DerefMut<Target = Adapter> where Self: 'a;
+  type MutRef<'a>: std::ops::DerefMut<Target = Adapter>
+  where
+    Self: 'a;
   fn construct(adapter: Adapter) -> Self;
-  fn provide<'a, 'this>(&'this mut self) -> Self::MutRef<'a> where 'this: 'a;
+  fn provide<'a, 'this>(&'this mut self) -> Self::MutRef<'a>
+  where
+    'this: 'a;
 }
 
 impl ConstructsAndProvidesAdapter for Box<Adapter> {
@@ -141,7 +143,10 @@ impl ConstructsAndProvidesAdapter for Box<Adapter> {
     Box::new(adapter)
   }
 
-  fn provide<'a, 'this>(&'this mut self) -> Self::MutRef<'a> where 'this: 'a {
+  fn provide<'a, 'this>(&'this mut self) -> Self::MutRef<'a>
+  where
+    'this: 'a,
+  {
     &mut *self
   }
 }
@@ -152,7 +157,10 @@ impl ConstructsAndProvidesAdapter for Arc<Mutex<Adapter>> {
     Arc::new(Mutex::new(adapter))
   }
 
-  fn provide<'a, 'this>(&'this mut self) -> Self::MutRef<'a> where 'this: 'a {
+  fn provide<'a, 'this>(&'this mut self) -> Self::MutRef<'a>
+  where
+    'this: 'a,
+  {
     self.lock().unwrap()
   }
 }
@@ -163,7 +171,10 @@ impl ConstructsAndProvidesAdapter for std::rc::Rc<std::cell::RefCell<Adapter>> {
     std::rc::Rc::new(std::cell::RefCell::new(adapter))
   }
 
-  fn provide<'a,'this>(&'this mut self) -> Self::MutRef<'a> where 'this: 'a {
+  fn provide<'a, 'this>(&'this mut self) -> Self::MutRef<'a>
+  where
+    'this: 'a,
+  {
     self.try_borrow_mut().unwrap()
   }
 }
@@ -205,9 +216,7 @@ impl Adapter {
     )?;
     WintunOpenAdapter(&name)
   }
-  pub fn open_wrapped<T: ConstructsAndProvidesAdapter>(
-    name: &str,
-  ) -> std::io::Result<T> {
+  pub fn open_wrapped<T: ConstructsAndProvidesAdapter>(name: &str) -> std::io::Result<T> {
     let name: StaticWideCStr<MAX_ADAPTER_NAME> = cutils::strings::encode(name).ok_or(
       std::io::Error::new(std::io::ErrorKind::InvalidInput, "Tunnel name is too long"),
     )?;
@@ -225,7 +234,10 @@ impl Adapter {
   pub fn start_session(&mut self, capacity: RingCapacity) -> std::io::Result<Box<Session>> {
     WintunStartSession(self, capacity.0)
   }
-  pub fn start_session_wrapped<T: ConstrunctsAndProvidesSession>(&mut self, capacity: RingCapacity) -> std::io::Result<T> {
+  pub fn start_session_wrapped<T: ConstrunctsAndProvidesSession>(
+    &mut self,
+    capacity: RingCapacity,
+  ) -> std::io::Result<T> {
     WintunStartSession(self, capacity.0)
   }
   pub fn set_ip_address(&mut self, internal_ip: IpAndMaskPrefix) -> std::io::Result<()> {
@@ -452,8 +464,7 @@ fn WintunCreateAdapterSwDevice(
     cbSize: csizeof!(SW_DEVICE_CREATE_INFO),
     pszInstanceId: instance_id_str.as_ptr(),
     pszzHardwareIds: hwids.as_ptr(),
-    CapabilityFlags: (_SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesSilentInstall
-      | _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesDriverRequired) as _,
+    CapabilityFlags: SilentInstall | DriverRequired,
     pszDeviceDescription: tunnel_type.as_ptr(),
     ..unsafe { core::mem::zeroed() }
   };
@@ -593,8 +604,7 @@ fn WintunCreateAdapterStub(
     cbSize: csizeof!(SW_DEVICE_CREATE_INFO),
     pszInstanceId: instance_id_str.as_ptr(),
     pszzHardwareIds: widecstr!("").as_ptr(),
-    CapabilityFlags: (_SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesSilentInstall
-      | _SW_DEVICE_CAPABILITIES_SWDeviceCapabilitiesDriverRequired) as u32,
+    CapabilityFlags: (SilentInstall | DriverRequired) as u32,
     pszDeviceDescription: tunnel_type.as_ptr(),
     ..unsafe { std::mem::zeroed() }
   };
@@ -795,9 +805,9 @@ pub fn WintunOpenAdapter<T: ConstructsAndProvidesAdapter>(Name: &WideCStr) -> st
   }
   adapter_prov.DevInfo = DevInfo;
   adapter_prov.DevInfoData = DevInfoData;
-  let Ret =
-    WaitForInterface(&adapter_prov.DevInstanceID).is_ok() && PopulateAdapterData(&mut adapter_prov).is_ok();
-    adapter_prov.DevInfo = null_mut();
+  let Ret = WaitForInterface(&adapter_prov.DevInstanceID).is_ok()
+    && PopulateAdapterData(&mut adapter_prov).is_ok();
+  adapter_prov.DevInfo = null_mut();
   if !Ret {
     return Err(last_error!("Failed to populate adapter"));
     // goto cleanupDevInfo;
@@ -943,13 +953,13 @@ pub(crate) unsafe extern "C" fn WaitForInterfaceCallback(
   let ActionData = &*ActionData;
   let mut Ret = ERROR_SUCCESS;
   match ActionData.Action {
-    _DEV_QUERY_RESULT_ACTION_DevQueryResultStateChange => {
-      if ActionData.Data.State != _DEV_QUERY_STATE_DevQueryStateAborted {
+    DEV_QUERY_RESULT_ACTION::StateChange => {
+      if ActionData.Data.State != DEV_QUERY_STATE::Aborted {
         return;
       }
       Ret = ERROR_DEVICE_NOT_AVAILABLE;
     }
-    _DEV_QUERY_RESULT_ACTION_DevQueryResultAdd | _DEV_QUERY_RESULT_ACTION_DevQueryResultUpdate => {}
+    DEV_QUERY_RESULT_ACTION::Add | DEV_QUERY_RESULT_ACTION::Update => {}
     _ => return,
   }
   Ctx.LastError = Ret;
@@ -967,7 +977,7 @@ pub(crate) fn WaitForInterface(InstanceId: &WideCStr) -> std::io::Result<()> {
   let mut guid_devinterface_net = GUID_DEVINTERFACE_NET;
   let Filters = [
     DEVPROP_FILTER_EXPRESSION {
-      Operator: _DEVPROP_OPERATOR_DEVPROP_OPERATOR_EQUALS_IGNORE_CASE,
+      Operator: EQUALS_IGNORE_CASE,
       Property: DEVPROPERTY {
         CompKey: DEVPROPCOMPKEY {
           Key: DEVPKEY_Device_InstanceId,
@@ -980,7 +990,7 @@ pub(crate) fn WaitForInterface(InstanceId: &WideCStr) -> std::io::Result<()> {
       },
     },
     DEVPROP_FILTER_EXPRESSION {
-      Operator: _DEVPROP_OPERATOR_DEVPROP_OPERATOR_EQUALS,
+      Operator: EQUALS,
       Property: DEVPROPERTY {
         CompKey: DEVPROPCOMPKEY {
           Key: DEVPKEY_DeviceInterface_Enabled,
@@ -993,7 +1003,7 @@ pub(crate) fn WaitForInterface(InstanceId: &WideCStr) -> std::io::Result<()> {
       },
     },
     DEVPROP_FILTER_EXPRESSION {
-      Operator: _DEVPROP_OPERATOR_DEVPROP_OPERATOR_EQUALS,
+      Operator: EQUALS,
       Property: DEVPROPERTY {
         CompKey: DEVPROPCOMPKEY {
           Key: DEVPKEY_DeviceInterface_ClassGuid,
@@ -1010,8 +1020,8 @@ pub(crate) fn WaitForInterface(InstanceId: &WideCStr) -> std::io::Result<()> {
   let mut Query: HDEVQUERY = null_mut();
   let HRet = unsafe {
     DevCreateObjectQuery(
-      _DEV_OBJECT_TYPE_DevObjectTypeDeviceInterface,
-      _DEV_QUERY_FLAGS_DevQueryFlagUpdateResults as _,
+      DEV_OBJECT_TYPE::DeviceInterface,
+      DEV_QUERY_FLAGS::UpdateResults as _,
       0,
       std::ptr::null(),
       Filters.len() as DWORD,
@@ -1088,6 +1098,7 @@ pub(crate) fn AdapterRemoveInstance(
   DevInfo: HDEVINFO,
   DevInfoData: *mut SP_DEVINFO_DATA,
 ) -> std::io::Result<()> {
+  #[cfg(any(target_arch = "x86", target_arch = "arm", target_arch = "x86_64"))]
   if unsafe { get_system_params().NativeMachine } != IMAGE_FILE_PROCESS {
     return remove_instance(DevInfo, DevInfoData);
   }
@@ -1120,6 +1131,7 @@ pub(crate) fn AdapterEnableInstance(
   DevInfo: HDEVINFO,
   DevInfoData: *mut SP_DEVINFO_DATA,
 ) -> std::io::Result<()> {
+  #[cfg(any(target_arch = "x86", target_arch = "arm", target_arch = "x86_64"))]
   if unsafe { get_system_params().NativeMachine } != IMAGE_FILE_PROCESS {
     return enable_instance(DevInfo, DevInfoData);
   }
@@ -1154,6 +1166,7 @@ pub(crate) fn AdapterDisableInstance(
   DevInfo: HDEVINFO,
   DevInfoData: *mut SP_DEVINFO_DATA,
 ) -> std::io::Result<()> {
+  #[cfg(any(target_arch = "x86", target_arch = "arm", target_arch = "x86_64"))]
   if unsafe { get_system_params().NativeMachine } != IMAGE_FILE_PROCESS {
     return enable_instance(DevInfo, DevInfoData);
   }

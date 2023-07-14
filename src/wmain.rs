@@ -5,7 +5,7 @@ use cutils::{
 };
 use winapi::{
   shared::{
-    minwindef::{BOOL, DWORD, FALSE, TRUE},
+    minwindef::{BOOL, DWORD, FALSE, TRUE, USHORT},
     ntdef::HANDLE,
     sddl::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1},
   },
@@ -23,7 +23,7 @@ use winapi::{
 
 use crate::{
   adapter_win7::cleanup_lagacy_devices, logger::last_error, namespace::NamespaceInit,
-  ntdll::RtlGetNtVersionNumbers, winapi_ext::devquery::USHORT,
+  ntdll::RtlGetNtVersionNumbers,
 };
 
 pub struct SystemParams {
@@ -189,7 +189,7 @@ fn EnvInit() -> (bool, bool, USHORT) {
   #[cfg(not(feature = "windows_10"))]
   let IsWindows10 = MajorVersion > 10;
   let mut NativeMachine = IMAGE_FILE_PROCESS;
-  #[cfg(target_pointer_width = "64")]
+  #[cfg(any(target_arch = "x86", target_arch = "arm", target_arch = "x86_64"))]
   {
     type IsWow64Process2Func = unsafe extern "system" fn(
       Process: HANDLE,
