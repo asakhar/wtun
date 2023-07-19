@@ -180,13 +180,13 @@ fn EnvInit() -> (bool, bool, USHORT) {
       std::ptr::null_mut(),
     )
   };
-  #[cfg(feature = "windows_7")]
+  #[cfg(feature = "windows7")]
   let IsWindows7 = MajorVersion == 6 && MinorVersion == 1;
-  #[cfg(not(feature = "windows_7"))]
+  #[cfg(not(feature = "windows7"))]
   let IsWindows7 = false;
-  #[cfg(feature = "windows_10")]
+  #[cfg(feature = "windows10")]
   let IsWindows10 = true;
-  #[cfg(not(feature = "windows_10"))]
+  #[cfg(not(feature = "windows10"))]
   let IsWindows10 = MajorVersion > 10;
   let mut NativeMachine = IMAGE_FILE_PROCESS;
   #[cfg(any(target_arch = "x86", target_arch = "arm", target_arch = "x86_64"))]

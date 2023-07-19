@@ -48,7 +48,6 @@ cutils = { git = "https://github.com/asakhar/cutils.git" }
 chrono = "*"
 
 [features]
-default = ["windows_10", "wow64_support"]
-wow64_support = []
-windows_7 = []
-windows_10 = []
+default = ["windows10"]
+windows7 = []
+windows10 = []

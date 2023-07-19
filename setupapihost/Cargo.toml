@@ -1,0 +1,16 @@
+[package]
+name = "setupapihost"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+winapi = { version = "0.3.9", features = ["windef", "processenv", "shellapi", "setupapi", "devguid"] }
+cutils = { git = "https://github.com/asakhar/cutils.git" }
+
+[features]
+windows7 = []
