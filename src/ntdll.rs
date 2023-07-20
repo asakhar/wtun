@@ -64,14 +64,12 @@ pub type PKEY_NAME_INFORMATION = *mut KEY_NAME_INFORMATION;
 pub const STATUS_INFO_LENGTH_MISMATCH: NTSTATUS = 0xC0000004u32 as NTSTATUS;
 
 extern "C" {
-  /* We can't use RtlGetVersion, because appcompat's aclayers.dll shims it to report Vista
-   * when run from legacy contexts. So, we instead use the undocumented RtlGetNtVersionNumbers.
-   *
-   * Another way would be reading from the PEB directly:
-   *   ((DWORD *)NtCurrentTeb()->ProcessEnvironmentBlock)[sizeof(VOID *) == 8 ? 70 : 41]
-   * Or just read from KUSER_SHARED_DATA the same way on 32-bit and 64-bit:
-   *    *(DWORD *)0x7FFE026C
-   */
+  // We can't use RtlGetVersion, because appcompat's aclayers.dll shims it to report Vista
+  // when run from legacy contexts. So, we instead use the undocumented RtlGetNtVersionNumbers.
+  //
+  // Another way would be reading from the PEB directly:
+  //   ((DWORD *)NtCurrentTeb()->ProcessEnvironmentBlock)[sizeof(VOID *) == 8 ? 70 : 41]
+  // Or just read from KUSER_SHARED_DATA the same way on 32-bit and 64-bit: *(DWORD *)0x7FFE026C
   pub fn RtlGetNtVersionNumbers(
     /*_Out_*/ MajorVersion: *mut DWORD,
     /*_Out_*/ MinorVersion: *mut DWORD,
