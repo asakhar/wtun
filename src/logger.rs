@@ -1,7 +1,6 @@
 use std::{mem::size_of, time::SystemTime};
 
 use cutils::{
-  ignore::ResultIgnoreExt,
   inspection::{CastToMutVoidPtrExt, GetPtrExt},
   set_last_error,
   strings::WideCString,
@@ -18,30 +17,7 @@ use crate::{
   registry::{RegKey, MAX_REG_PATH},
 };
 
-/**
- * Determines the level of logging, passed to WINTUN_LOGGER_CALLBACK.
- */
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum LogLevel {
-  Info,
-  Warning,
-  Error,
-}
-
-/**
- * Called by internal logger to report diagnostic messages
- *
- * @param Level         Message level.
- *
- * @param Timestamp     Message timestamp in in 100ns intervals since 1601-01-01 UTC.
- *
- * @param Message       Message text.
- */
-pub type LoggerCallback = fn(Level: LogLevel, Timestamp: SystemTime, Message: core::fmt::Arguments);
-pub static WINTUN_LOGGER: Logger = Logger::new();
-pub struct Logger {
-  logger: std::sync::RwLock<LoggerCallback>,
-}
+pub use log::Level;
 
 pub trait IntoError {
   fn into_error(self) -> std::io::Error;
@@ -71,113 +47,41 @@ impl IntoError for i32 {
   }
 }
 
-impl Logger {
-  const fn new() -> Self {
-    Self {
-      logger: std::sync::RwLock::new(NopLogger),
-    }
-  }
-  pub fn log_with_time(&self, level: LogLevel, time: std::time::SystemTime, log_line: core::fmt::Arguments) {
-    self.logger.read().ignore()(level, time, format_args!("{}", log_line));
-  }
-  pub fn log(&self, level: LogLevel, log_line: core::fmt::Arguments) {
-    self.log_with_time(level, std::time::SystemTime::now(), log_line);
-  }
-  pub fn error(&self, Error: impl IntoError, Prefix: core::fmt::Arguments) -> std::io::Error {
-    let error = Error.into_error();
-    self.logger.read().ignore()(LogLevel::Error, SystemTime::now(), format_args!("{}: {} (Code 0x{:08X})", Prefix, error, error.raw_os_error().unwrap_or(0)));
-    error
-  }
-}
-
-pub fn set_logger(new_logger: LoggerCallback) -> LoggerCallback {
-  std::mem::replace(&mut WINTUN_LOGGER.logger.write().ignore(), new_logger)
-}
-
 mod macro_impl {
-
-  macro_rules! log {
-    ($level:expr, $fmt:literal, $($args:expr),*) => {
-      {
-        $crate::logger::WINTUN_LOGGER.log($level, format_args!(concat!(file!(), ":", line!(), " => ", $fmt), $($args),*))
-      }
-    };
-    ($level:expr, $fmt:literal) => {
-      {
-        $crate::logger::WINTUN_LOGGER.log($level, format_args!(concat!(file!(), ":", line!(), " => ", $fmt)))
-      }
-    };
-  }
-
-  macro_rules! info {
-    ($fmt:literal, $($args:expr),*) => {
-      {
-        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Info, format_args!(concat!(file!(), ":", line!(), " => ", $fmt), $($args),*))
-      }
-    };
-    ($fmt:literal) => {
-      {
-        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Info, format_args!(concat!(file!(), ":", line!(), " => ", $fmt)))
-      }
-    };
-  }
-
-  macro_rules! warning {
-    ($fmt:literal, $($args:expr),*) => {
-      {
-        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Warning, format_args!(concat!(file!(), ":", line!(), " => ", $fmt), $($args),*))
-      }
-    };
-    ($fmt:literal) => {
-      {
-        $crate::logger::WINTUN_LOGGER.log($crate::logger::LogLevel::Warning, format_args!(concat!(file!(), ":", line!(), " => ", $fmt)))
-      }
-    };
-  }
-
   macro_rules! error {
-    ($error:expr, $fmt:literal, $($args:expr),*) => {
+    ($error:expr, $fmt:literal $(,$args:expr)*) => {
       {
-        $crate::logger::WINTUN_LOGGER.error($error, format_args!(concat!(file!(), ":", line!(), " => ", $fmt), $($args),*))
-      }
-    };
-    ($error:expr, $fmt:literal) => {
-      {
-        $crate::logger::WINTUN_LOGGER.error($error, format_args!(concat!(file!(), ":", line!(), " => ", $fmt)))
+        {
+          use $crate::logger::IntoError;
+          let error: ::std::io::Error = $error.into_error();
+          log::error!("{}: {} (Code 0x{:08X})", format_args!($fmt $(,$args)*), error, error.raw_os_error().unwrap_or(0));
+          error
+        }
       }
     };
   }
 
   macro_rules! last_error {
-    ($fmt:literal, $($args:expr),*) => {
+    ($fmt:literal $(,$args:expr)*) => {
       {
         let last_error = std::io::Error::last_os_error();
-        $crate::logger::WINTUN_LOGGER.error(last_error, format_args!(concat!(file!(), ":", line!(), " => ", $fmt), $($args),*))
-        // let res = $crate::logger::error!(last_error, $fmt, $($args),*);
-        // res
-      }
-    };
-    ($fmt:literal) => {
-      {
-        let last_error = std::io::Error::last_os_error();
-        $crate::logger::WINTUN_LOGGER.error(last_error, format_args!(concat!(file!(), ":", line!(), " => ", $fmt)))
-        // let res = $crate::logger::error!(last_error, $fmt);
-        // res
+        log::error!("{}: {} (Code 0x{:08X})", format_args!($fmt $(,$args)*), last_error, last_error.raw_os_error().unwrap_or(0));
+        last_error
       }
     };
   }
   pub(crate) use error;
-  pub(crate) use info;
+  pub(crate) use log::info;
   pub(crate) use last_error;
-  pub(crate) use log;
-  pub(crate) use warning;
+  pub(crate) use log::log;
+  pub(crate) use log::warn;
 }
 
 pub(crate) use macro_impl::error;
 pub(crate) use macro_impl::info;
 pub(crate) use macro_impl::last_error;
 pub(crate) use macro_impl::log;
-pub(crate) use macro_impl::warning as warn;
+pub(crate) use macro_impl::warn;
 
 fn LoggerGetRegistryKeyPathImpl(Key: HKEY) -> WideCString {
   if Key.is_null() {
@@ -377,4 +281,4 @@ pub fn LoggerGetRegistryKeyPath(Key: &RegKey) -> WideCString {
 //   set_last_error(LastError);
 // }
 
-fn NopLogger(_Level: LogLevel, _Timestamp: SystemTime, _LogLine: core::fmt::Arguments) {}
+fn NopLogger(_Level: Level, _Timestamp: SystemTime, _LogLine: core::fmt::Arguments) {}

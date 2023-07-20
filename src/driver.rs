@@ -40,7 +40,7 @@ use crate::{
     AdapterCleanupOrphanedDevices, AdapterDisableInstance, AdapterEnableInstance,
     DEVPKEY_Wintun_Name, WINTUN_ENUMERATOR, WINTUN_HWID,
   },
-  logger::{error, info, last_error, log, warn},
+  logger::{error, last_error, info, log, warn, IntoError},
   namespace::SystemNamedMutexLock,
   ntdll::{SystemModuleInformation, RTL_PROCESS_MODULES},
   resource::{copy_to_file, create_temp_dir, ResId},
@@ -109,7 +109,7 @@ fn DisableAllOurAdapters(
       .ok()
       .ok_or(Win32Error::new(ERROR_INVALID_DATA))?;
     log!(
-      crate::logger::LogLevel::Info,
+      crate::logger::Level::Info,
       "Disabling adapter \"{}\"",
       name.display()
     );
@@ -227,14 +227,11 @@ fn VersionOfFile(filename: &WideCStr) -> std::io::Result<DWORD> {
   let fixed_info: &mut VS_FIXEDFILEINFO = unsafe { &mut *(fixed_info.cast()) };
   let version = fixed_info.dwFileVersionMS;
   if version == 0 {
-    log!(
-      crate::logger::LogLevel::Warning,
+    warn!(
       "Determined version of {}, but was v0.0, so returning failure",
       filename.display()
     );
-    return Err(std::io::Error::from_raw_os_error(
-      ERROR_VERSION_PARSE_ERROR as i32,
-    ));
+    return Err(ERROR_VERSION_PARSE_ERROR.into_error());
   }
   Ok(version)
 }
@@ -432,18 +429,14 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
         }
         drop(DisableAllOurAdapters(DevInfo, &mut existing_adapters));
         log!(
-          crate::logger::LogLevel::Info,
+          crate::logger::Level::Info,
           "Waiting for existing driver to unload from kernel"
         );
         if !EnsureWintunUnloaded() {
-          log!(
-            crate::logger::LogLevel::Warning,
-            "Failed to unload existing driver, which means a reboot will likely be required"
-          );
+          warn!("Failed to unload existing driver, which means a reboot will likely be required");
         }
       }
-      log!(
-        crate::logger::LogLevel::Info,
+      info!(
         "Removing existing driver {}.{}",
         ((DrvInfoData.DriverVersion & 0xffff000000000000) >> 48),
         ((DrvInfoData.DriverVersion & 0x0000ffff00000000) >> 32)

@@ -50,7 +50,7 @@ use crate::{
     Adapter, AdapterGetDeviceObjectFileName, AdapterRemoveInstance, DEVPKEY_Wintun_Name,
     WINTUN_ENUMERATOR, WINTUN_HWID,
   },
-  logger::{error, info, last_error, IntoError},
+  logger::{error, last_error, IntoError, info},
   registry::RegKey,
   rundll32::*,
   wmain::{get_system_params, IMAGE_FILE_PROCESS},

@@ -1,4 +1,4 @@
-use std::io::{BufRead, Read};
+use std::io::BufRead;
 
 use cutils::{defer, files::get_windows_dir_path, inspection::GetPtrExt, strings::StaticWideCStr};
 use get_last_error::Win32Error;
@@ -15,7 +15,7 @@ use winapi::{
 };
 
 use crate::{
-  logger::{error, info, last_error},
+  logger::{error, last_error, info, log},
   resource::{self, create_temp_dir, ResId},
   wmain::get_system_params,
 };
@@ -76,8 +76,7 @@ fn execute_rundll32<'a>(function: &str, arguments: &[&str]) -> std::io::Result<V
   let dll_path = random_temp_subdir.join("setupapihost.dll");
   let native_machine = unsafe { get_system_params().NativeMachine };
   let resource_id = match native_machine {
-    IMAGE_FILE_MACHINE_AMD64 => ResId::SetupApiHostAmd64,
-    IMAGE_FILE_MACHINE_ARM64 => ResId::SetupApiHostArm64,
+    IMAGE_FILE_MACHINE_AMD64 | IMAGE_FILE_MACHINE_ARM64 => ResId::SetupApiHost,
     _ => {
       return Err(error!(
         Win32Error::new(ERROR_NOT_SUPPORTED),
@@ -116,24 +115,21 @@ fn execute_rundll32<'a>(function: &str, arguments: &[&str]) -> std::io::Result<V
   let stderr = proc.stderr.take().unwrap();
   let mut stderr = std::io::BufReader::new(stderr);
   let mut read_log = || -> std::io::Result<()> {
-    let mut buf = [0; 1];
-    stderr.read_exact(&mut buf)?;
-    let level = match buf[0] {
-      b'+' => crate::logger::LogLevel::Info,
-      b'-' => crate::logger::LogLevel::Warning,
-      b'!' => crate::logger::LogLevel::Error,
-      _ => return Err(std::io::ErrorKind::InvalidData.into()),
-    };
-    let mut buf = [0; 8];
-    stderr.read_exact(&mut buf)?;
-    let secs = u64::from_be_bytes(buf);
-    let mut buf = [0; 4];
-    stderr.read_exact(&mut buf)?;
-    let nanos = u32::from_be_bytes(buf);
-    let time = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(secs, nanos);
-    let mut buf = String::new();
-    stderr.read_line(&mut buf)?;
-    crate::logger::WINTUN_LOGGER.log_with_time(level, time, format_args!("{}", buf));
+    loop {
+      let mut buf = String::new();
+      if let Err(err) = stderr.read_line(&mut buf) {
+        if err.kind() == std::io::ErrorKind::UnexpectedEof {
+          break;
+        }
+      }
+      let level = match buf.chars().next() {
+        Some('+') => crate::logger::Level::Info,
+        Some('-') => crate::logger::Level::Warn,
+        Some('!') => crate::logger::Level::Error,
+        _ => return Err(std::io::ErrorKind::InvalidData.into()),
+      };
+      log!(level, "{}", &buf[1..]);
+    }
     Ok(())
   };
   while read_log().is_ok() {}

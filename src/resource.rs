@@ -3,7 +3,7 @@ use std::{
   path::{Path, PathBuf},
 };
 
-use cutils::{files::get_windows_dir_path};
+use cutils::files::get_windows_dir_path;
 use get_last_error::Win32Error;
 use rand::Rng;
 
@@ -14,22 +14,36 @@ pub enum ResId {
   Cat,
   Sys,
   Inf,
-  SetupApiHostAmd64,
-  SetupApiHostArm64,
+  SetupApiHost,
 }
 
 pub fn copy_to_file(dst: &Path, id: ResId) -> std::io::Result<()> {
   const WINTUN_CAT: &[u8] = include_bytes!("driver-files/wintun.cat");
   const WINTUN_SYS: &[u8] = include_bytes!("driver-files/wintun.sys");
   const WINTUN_INF: &[u8] = include_bytes!("driver-files/wintun.inf");
-  const WINTUN_SETUP_API_HOST_AMD64: &[u8] = include_bytes!("driver-files/setupapihost-amd64.dll");
-  const WINTUN_SETUP_API_HOST_ARM64: &[u8] = include_bytes!("driver-files/setupapihost-arm64.dll");
+  #[cfg(not(debug_assertions))]
+  macro_rules! toggle_release {
+    () => {
+      "release/"
+    };
+  }
+  #[cfg(debug_assertions)]
+  macro_rules! toggle_release {
+    () => {
+      "debug/"
+    };
+  }
+  const WINTUN_SETUP_API_HOST: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/setupapihost/",
+    toggle_release!(),
+    "setupapihost.dll"
+  ));
   let resource = match id {
     ResId::Cat => WINTUN_CAT,
     ResId::Sys => WINTUN_SYS,
     ResId::Inf => WINTUN_INF,
-    ResId::SetupApiHostAmd64 => WINTUN_SETUP_API_HOST_AMD64,
-    ResId::SetupApiHostArm64 => WINTUN_SETUP_API_HOST_ARM64,
+    ResId::SetupApiHost => WINTUN_SETUP_API_HOST,
   };
   std::fs::File::create(dst)
     .as_ref()
@@ -54,7 +68,11 @@ pub fn create_temp_dir() -> std::io::Result<PathBuf> {
   let temp_path = windows_dir_path.join("Temp");
   const HEX: [u8; 16] = *b"0123456789ABCDEF";
   let hex_dist = rand::distributions::Slice::new(&HEX).unwrap();
-  let random_hex_string: String = rand::thread_rng().sample_iter(&hex_dist).take(32).map(|c| *c as char).collect();
+  let random_hex_string: String = rand::thread_rng()
+    .sample_iter(&hex_dist)
+    .take(32)
+    .map(|c| *c as char)
+    .collect();
   let random_temp_sub_dir_path = temp_path.join(random_hex_string);
   // TODO: std::fs::set_permissions(path, perm)
   std::fs::create_dir_all(&random_temp_sub_dir_path)

@@ -1,18 +1,8 @@
-use chrono::offset::Local;
-use chrono::DateTime;
 use std::io::Write;
-use std::time::SystemTime;
+
+use simple_logger::SimpleLogger;
 use wtun::*;
 
-fn logger(level: LogLevel, timestamp: SystemTime, message: core::fmt::Arguments) {
-  let timestamp: DateTime<Local> = timestamp.into();
-  eprintln!(
-    "[{:?}] [{}] {}",
-    level,
-    timestamp.format("%d.%m.%Y %T"),
-    message
-  );
-}
 fn ipchecksum(buffer: &[u8]) -> u16 {
   let mut sum: u32 = 0;
   let mut len: u32 = buffer.len() as u32;
@@ -59,7 +49,7 @@ fn make_icmp<'a, 'p>(mut packet: SendPacketWrite<'a, 'p>) {
 
 #[test]
 fn creates_session() {
-  set_logger(logger);
+  drop(SimpleLogger::new().init());
   let mut adapter = Adapter::create("test", "test type", None).unwrap();
   let session = adapter
     .start_session(ring_capacity!(MAX_RING_CAPACITY))
@@ -68,7 +58,7 @@ fn creates_session() {
 }
 #[test]
 fn creates_and_sends() {
-  set_logger(logger);
+  drop(SimpleLogger::new().init());
   let mut adapter = Adapter::create("test", "test type", None).unwrap();
   let session = adapter
     .start_session(ring_capacity!(MAX_RING_CAPACITY))
@@ -81,7 +71,7 @@ fn creates_and_sends() {
 }
 #[test]
 fn creates_and_recvs() {
-  set_logger(logger);
+  drop(SimpleLogger::new().init());
   let mut adapter = Adapter::create("test", "test type", None).unwrap();
   let session = adapter
     .start_session(ring_capacity!(MAX_RING_CAPACITY))
@@ -95,7 +85,7 @@ fn creates_and_recvs() {
 
 #[test]
 fn creates_and_sends_alerts() {
-  set_logger(logger);
+  drop(SimpleLogger::new().init());
   let mut adapter = Adapter::create("test", "test type", None).unwrap();
   let session = adapter
     .start_session(ring_capacity!(MIN_RING_CAPACITY))

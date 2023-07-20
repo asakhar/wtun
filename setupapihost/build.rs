@@ -1,3 +1,3 @@
 fn main() {
-  println!("cargo:rustc-link-lib=Setupapi.lib",);
+  println!("cargo:rustc-link-lib=Setupapi");
 }

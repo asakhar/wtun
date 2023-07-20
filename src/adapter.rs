@@ -68,7 +68,7 @@ use winapi::DEFINE_GUID;
 use crate::adapter_win7::{create_adapter_post_win7, create_adapter_win7};
 use crate::driver::{DriverInstall, DriverInstallDeferredCleanup};
 use crate::logger::LoggerGetRegistryKeyPath;
-use crate::logger::{error, info, last_error, log};
+use crate::logger::{error, last_error, info, log};
 use crate::namespace::SystemNamedMutexLock;
 use crate::nci::SetConnectionName;
 use crate::registry::{RegKey, RegistryQueryDWORD, RegistryQueryString};
@@ -81,8 +81,7 @@ use crate::winapi_ext::devquery::{
 };
 use crate::winapi_ext::devquery::{DEV_OBJECT_TYPE, DEV_QUERY_RESULT_ACTION, DEV_QUERY_STATE};
 use crate::winapi_ext::swdevice::{
-  SwDeviceClose, SwDeviceCreate, HSWDEVICE, DriverRequired,
-  SilentInstall, SW_DEVICE_CREATE_INFO,
+  DriverRequired, SilentInstall, SwDeviceClose, SwDeviceCreate, HSWDEVICE, SW_DEVICE_CREATE_INFO,
 };
 use crate::winapi_ext::winternl::RtlNtStatusToDosError;
 use crate::wmain::{get_system_params, IMAGE_FILE_PROCESS};
@@ -1328,7 +1327,7 @@ pub fn AdapterCleanupOrphanedDevices() {
       continue;
     }
     log!(
-      crate::logger::LogLevel::Info,
+      crate::logger::Level::Info,
       "Removed orphaned adapter \"{}\"",
       Name.display()
     );
