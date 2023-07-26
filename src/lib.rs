@@ -314,7 +314,9 @@ pub const fn parse_u16_hex(data: &str) -> u16 {
 #[macro_export]
 macro_rules! ip_mask {
   ($p1:literal . $p2:literal . $p3:literal . $p4:literal / $prefix:literal) => {{
+    #[allow(non_upper_case_globals)]
     const ip: ::std::net::Ipv4Addr = $crate::parse_ipv4(stringify!($p1 . $p2 . $p3 . $p4));
+    #[allow(non_upper_case_globals)]
     const prefix: $crate::Ipv4MaskPrefix = match $crate::Ipv4MaskPrefix::new($prefix) {
       Ok(res) => res,
       _ => panic!("Invalid mask prefix"),
@@ -322,7 +324,9 @@ macro_rules! ip_mask {
     $crate::IpAndMaskPrefix::V4 { ip, prefix }
   }};
   ($p1:literal . $p2:literal . $p3:literal / $prefix:literal) => {{
+    #[allow(non_upper_case_globals)]
     const ip: ::std::net::Ipv4Addr = $crate::parse_ipv4(stringify!($p1 . $p2 . $p3));
+    #[allow(non_upper_case_globals)]
     const prefix: $crate::Ipv4MaskPrefix = match $crate::Ipv4MaskPrefix::new($prefix) {
       Ok(res) => res,
       _ => panic!("Invalid mask prefix"),
@@ -330,7 +334,9 @@ macro_rules! ip_mask {
     $crate::IpAndMaskPrefix::V4 { ip, prefix }
   }};
   ($p1:literal . $p2:literal / $prefix:literal) => {{
+    #[allow(non_upper_case_globals)]
     const ip: ::std::net::Ipv4Addr = $crate::parse_ipv4(stringify!($p1 . $p2));
+    #[allow(non_upper_case_globals)]
     const prefix: $crate::Ipv4MaskPrefix = match $crate::Ipv4MaskPrefix::new($prefix) {
       Ok(res) => res,
       _ => panic!("Invalid mask prefix"),
@@ -339,6 +345,7 @@ macro_rules! ip_mask {
   }};
   ($($i1:ident)?$($l1:literal)?:$($i2:ident)?$($l2:literal)?:$($i3:ident)?$($l3:literal)?:$($i4:ident)?$($l4:literal)?:$($i5:ident)?$($l5:literal)?:$($i6:ident)?$($l6:literal)?:$($i7:ident)?$($l7:literal)?:$($i8:ident)?$($l8:literal)?/$prefix:literal) => {
     {
+      #[allow(non_upper_case_globals)]
       const ip: ::std::net::Ipv6Addr = ::std::net::Ipv6Addr::new(
         $crate::parse_u16_hex(stringify!($($i1)?$($l1)?)),
         $crate::parse_u16_hex(stringify!($($i2)?$($l2)?)),
@@ -349,6 +356,7 @@ macro_rules! ip_mask {
         $crate::parse_u16_hex(stringify!($($i7)?$($l7)?)),
         $crate::parse_u16_hex(stringify!($($i8)?$($l8)?)),
       );
+      #[allow(non_upper_case_globals)]
       const prefix: $crate::Ipv6MaskPrefix = match $crate::Ipv6MaskPrefix::new($prefix) {
         Ok(res) => res,
         _ => panic!("Invalid mask prefix"),

@@ -18,7 +18,7 @@ use winapi::{
 };
 
 use crate::{
-  logger::{error, info, last_error, log},
+  logger::{error, info, last_error},
   resource::{self, create_temp_dir, ResId},
   wmain::get_system_params,
 };
@@ -142,7 +142,7 @@ fn execute_rundll32(function: &str, arguments: &[&str]) -> std::io::Result<Vec<u
           ))
         }
       };
-      log!(level, "{}", &buf[1..]);
+      log::log!(target: "rundll32", level, "{}", &buf[1..]);
     }
   };
   let mut more = true;

@@ -49,6 +49,7 @@ macro_rules! info {
     write_formatted(winapi::um::winbase::STD_ERROR_HANDLE, &msg);
   };
 }
+#[allow(unused_macros)]
 macro_rules! warn {
   ($fmt:literal $(,$args:expr)*) => {
     let msg = cutils::widecstring!("{}", format_args!(concat!("-", $fmt) $(,$args)*));
@@ -94,7 +95,7 @@ pub unsafe extern "system" fn RemoveInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _
   let dev_info =
     SetupDiCreateDeviceInfoListExW(&GUID_DEVCLASS_NET, null_mut(), null_mut(), null_mut());
   if !check_handle(dev_info) {
-    error!("Failed to create dev info.");
+    error!("Failed to create dev info");
     return;
   }
   unsafe_defer! { cleanup_dev_info <-
@@ -113,6 +114,7 @@ pub unsafe extern "system" fn RemoveInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _
       &mut dev_info_data,
     )
   {
+    error!("Failed to open device info");
     return;
   }
   let mut remove_device_params = SP_REMOVEDEVICE_PARAMS {
@@ -132,6 +134,7 @@ pub unsafe extern "system" fn RemoveInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _
     )
     || FALSE == SetupDiCallClassInstaller(DIF_REMOVE, dev_info, &mut dev_info_data)
   {
+    error!("Failed to set remove device params");
     return;
   }
   cleanup_dev_info.run();
@@ -158,6 +161,7 @@ pub unsafe extern "system" fn EnableInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _
   let dev_info =
     SetupDiCreateDeviceInfoListExW(&GUID_DEVCLASS_NET, null_mut(), null_mut(), null_mut());
   if !check_handle(dev_info) {
+    error!("Failed to create device info list");
     return;
   }
   unsafe_defer! { cleanup_dev_info <-
@@ -176,6 +180,7 @@ pub unsafe extern "system" fn EnableInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _
       &mut dev_info_data,
     )
   {
+    error!("Failed to open device info");
     return;
   }
   let mut params = SP_PROPCHANGE_PARAMS {
@@ -196,6 +201,7 @@ pub unsafe extern "system" fn EnableInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _
     )
     || FALSE == SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, dev_info, &mut dev_info_data)
   {
+    error!("Failed to enable instance");
     return;
   }
   cleanup_dev_info.run();
@@ -222,6 +228,7 @@ pub unsafe extern "system" fn DisableInstance(_: HWND, _: HINSTANCE, _: LPCSTR, 
   let dev_info =
     SetupDiCreateDeviceInfoListExW(&GUID_DEVCLASS_NET, null_mut(), null_mut(), null_mut());
   if !check_handle(dev_info) {
+    error!("Failed to create device info list");
     return;
   }
   unsafe_defer! { cleanup_dev_info <-
@@ -240,6 +247,7 @@ pub unsafe extern "system" fn DisableInstance(_: HWND, _: HINSTANCE, _: LPCSTR, 
       &mut dev_info_data,
     )
   {
+    error!("Failed to open device info");
     return;
   }
   let mut params = SP_PROPCHANGE_PARAMS {
@@ -260,6 +268,7 @@ pub unsafe extern "system" fn DisableInstance(_: HWND, _: HINSTANCE, _: LPCSTR, 
     )
     || FALSE == SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, dev_info, &mut dev_info_data)
   {
+    error!("Failed to enable instance");
     return;
   }
   cleanup_dev_info.run();

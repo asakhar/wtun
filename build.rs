@@ -56,9 +56,7 @@ fn main() {
       .arg(format!(
         "--target-dir={}/setupapihost",
         std::env::var("OUT_DIR").unwrap()
-      ))
-      // .arg("--target=i686-pc-windows-msvc")
-      ;
+      ));
     toggle_windows7!(command);
     toggle_release!(command);
 
