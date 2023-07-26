@@ -1,6 +1,6 @@
 use cutils::{
   csizeof, cstr,
-  inspection::{CastToMutVoidPtrExt, GetPtrExt, InitZeroed},
+  inspection::{GetPtrExt, InitZeroed},
   unsafe_defer, widecstr,
 };
 use winapi::{
@@ -110,7 +110,7 @@ fn InitializeSecurityObjects() -> std::io::Result<(SECURITY_ATTRIBUTES, bool)> {
     CreateWellKnownSid(
       WinLocalSystemSid,
       std::ptr::null_mut(),
-      LocalSystemSid.as_mut_ptr().cast_to_pvoid(),
+      LocalSystemSid.as_mut_ptr().cast(),
       RequiredBytes.get_mut_ptr(),
     )
   } == FALSE
@@ -134,7 +134,7 @@ fn InitializeSecurityObjects() -> std::io::Result<(SECURITY_ATTRIBUTES, bool)> {
     GetTokenInformation(
       CurrentProcessToken,
       TokenUser,
-      TokenUserBuffer.get_mut_ptr().cast_to_pvoid(),
+      TokenUserBuffer.get_mut_ptr().cast(),
       csizeof!(TokenUserStruct),
       RequiredBytes.get_mut_ptr(),
     )
@@ -146,7 +146,7 @@ fn InitializeSecurityObjects() -> std::io::Result<(SECURITY_ATTRIBUTES, bool)> {
   let IsLocalSystem = unsafe {
     EqualSid(
       TokenUserBuffer.MaybeLocalSystem.User.Sid,
-      LocalSystemSid.as_mut_ptr().cast_to_pvoid(),
+      LocalSystemSid.as_mut_ptr().cast(),
     )
   } == TRUE;
   let string_sec_desc = if IsLocalSystem {
@@ -212,7 +212,7 @@ fn EnvInit() -> (bool, bool, USHORT) {
       return (IsWindows7, IsWindows10, get_native_machine());
     }
     let IsWow64Process2 =
-      unsafe { GetProcAddress(kernel32, cstr!("IsWow64Process2").as_ptr() as _) };
+      unsafe { GetProcAddress(kernel32, cstr!("IsWow64Process2").as_ptr().cast()) };
     if IsWow64Process2.is_null() {
       return (IsWindows7, IsWindows10, get_native_machine());
     }

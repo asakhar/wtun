@@ -357,14 +357,14 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
       "Failed to create new device information element"
     ));
   }
-  let hwids = wide_array!("Wintun"; 8);
+  let hwids = static_widecstr!("Wintun"; 8);
   let result = unsafe {
     SetupDiSetDeviceRegistryPropertyW(
       DevInfo,
       DevInfoData.get_mut_ptr(),
       SPDRP_HARDWAREID,
-      hwids.as_ptr() as *const BYTE,
-      std::mem::size_of_val(&hwids) as DWORD,
+      hwids.as_ptr().cast(),
+      hwids.sizeof(),
     )
   };
   if result == FALSE {
@@ -406,10 +406,11 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
       }
       continue;
     }
+    let drv_info_data_driver_date =DrvInfoData.DriverDate; 
     if IsNewer(
       &WINTUN_INF_FILETIME,
       WINTUN_INF_VERSION,
-      &DrvInfoData.DriverDate,
+      &drv_info_data_driver_date,
       DrvInfoData.DriverVersion,
     ) {
       if !check_handle(dev_info_existing_adapters) {
@@ -460,7 +461,8 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
         warn!("Failed getting adapter driver info detail");
         continue;
       }
-      let inf_file_name = unsafe { PathFindFileNameW(drv_info_detail_data.InfFileName.as_ptr()) };
+      let inf_file_name = drv_info_detail_data.InfFileName;
+      let inf_file_name = unsafe { PathFindFileNameW(inf_file_name.as_ptr()) };
       let result =
         unsafe { SetupUninstallOEMInfW(inf_file_name, SUOI_FORCEDELETE, std::ptr::null_mut()) };
       if result == FALSE {
@@ -472,8 +474,9 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
       }
       continue;
     }
+    let drv_info_data_driver_date = DrvInfoData.DriverDate;
     if !IsNewer(
-      &DrvInfoData.DriverDate,
+      &drv_info_data_driver_date,
       DrvInfoData.DriverVersion,
       &driver_date,
       driver_version,
@@ -642,7 +645,8 @@ pub fn WintunDeleteDriver() -> std::io::Result<()> {
       warn!("Failed getting adapter driver info detail");
       continue;
     }
-    let inf_file_name_ptr = unsafe { PathFindFileNameW(drv_info_detail_data.InfFileName.as_ptr()) };
+    let inf_file_name = drv_info_detail_data.InfFileName;
+    let inf_file_name_ptr = unsafe { PathFindFileNameW(inf_file_name.as_ptr()) };
     let inf_file_name = unsafe { WideCStr::from_ptr(inf_file_name_ptr) };
     info!("Removing driver {}", inf_file_name.display());
     let result = unsafe { SetupUninstallOEMInfW(inf_file_name_ptr, 0, std::ptr::null_mut()) };

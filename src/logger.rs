@@ -116,7 +116,7 @@ fn LoggerGetRegistryKeyPathImpl(Key: HKEY) -> WideCString {
 }
 
 pub fn LoggerGetRegistryKeyPath(Key: &RegKey) -> WideCString {
-  let LastError = get_last_error::Win32Error::get_last_error();
+  let LastError = std::io::Error::last_os_error();
   let res = LoggerGetRegistryKeyPathImpl(Key.as_raw());
   set_last_error(LastError);
   res

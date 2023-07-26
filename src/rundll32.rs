@@ -5,7 +5,10 @@ use get_last_error::Win32Error;
 use winapi::{
   shared::{
     minwindef::FALSE,
-    winerror::{ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED, ERROR_SUCCESS},
+    winerror::{
+      ERROR_ACCESS_DENIED, ERROR_INVALID_DATA, ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED,
+      ERROR_SUCCESS,
+    },
   },
   um::{
     cfgmgr32::MAX_DEVICE_ID_LEN,
@@ -15,7 +18,7 @@ use winapi::{
 };
 
 use crate::{
-  logger::{error, last_error, info, log},
+  logger::{error, info, last_error, log},
   resource::{self, create_temp_dir, ResId},
   wmain::get_system_params,
 };
@@ -42,25 +45,32 @@ pub(crate) fn create_instance() -> std::io::Result<StaticWideCStr<MAX_DEVICE_ID_
   info!("Spawning native process to create instance");
   let response = execute_rundll32("CreateInstanceWin7", &[])
     .map_err(|err| error!(err, "Error executing worker process"))?;
-  let error_bytes: [u8; 4] = response.as_slice().try_into().ok().ok_or(error!(
-    ERROR_INVALID_PARAMETER,
-    "Incomplete response: {:?}", response
-  ))?;
-  let error = u32::from_be_bytes(error_bytes);
-  if error != ERROR_SUCCESS {
-    return Err(std::io::Error::from_raw_os_error(error as i32));
-  }
-  use std::str::from_utf8;
-  from_utf8(&response[4..])
-    .ok()
-    .map(StaticWideCStr::<MAX_DEVICE_ID_LEN>::encode)
-    .flatten()
+  let resp_text = String::from_utf16(&response).map_err(|err| {
+    error!(
+      ERROR_INVALID_DATA,
+      "Failed to read process output ({err:?}): {:?}", response
+    )
+  })?;
+  let (error, inst_id) = resp_text
+    .split_once(' ')
+    .and_then(|(error_hex, inst_id)| {
+      u32::from_str_radix(&error_hex, 16)
+        .ok()
+        .map(|err| (err, inst_id))
+    })
     .ok_or(error!(
       ERROR_INVALID_PARAMETER,
-      "Invalid response: {:?}", response
-    ))
+      "Incomplete response: {}", resp_text
+    ))?;
+  if error != ERROR_SUCCESS {
+    return Err(error!(error, "Failed to create instance via rundll32"));
+  }
+  StaticWideCStr::<MAX_DEVICE_ID_LEN>::encode(inst_id).ok_or(error!(
+    ERROR_INVALID_PARAMETER,
+    "Invalid response: {:?}", response
+  ))
 }
-fn execute_rundll32<'a>(function: &str, arguments: &[&str]) -> std::io::Result<Vec<u8>> {
+fn execute_rundll32(function: &str, arguments: &[&str]) -> std::io::Result<Vec<u16>> {
   let windows_dir_path = match get_windows_dir_path() {
     Ok(res) => res,
     Err(err) => return Err(error!(err, "Failed to get Windows folder")),
@@ -105,34 +115,42 @@ fn execute_rundll32<'a>(function: &str, arguments: &[&str]) -> std::io::Result<V
   {
     Ok(res) => res,
     Err(err) => {
-      let err = err
-        .raw_os_error()
-        .map(|e| e as u32)
-        .unwrap_or(ERROR_ACCESS_DENIED);
       return Err(error!(err, "Failed to create process"));
     }
   };
   let stderr = proc.stderr.take().unwrap();
   let mut stderr = std::io::BufReader::new(stderr);
-  let mut read_log = || -> std::io::Result<()> {
+  let mut read_log = |more: &mut bool| -> std::io::Result<()> {
     loop {
       let mut buf = String::new();
-      if let Err(err) = stderr.read_line(&mut buf) {
-        if err.kind() == std::io::ErrorKind::UnexpectedEof {
-          break;
-        }
+      let len = stderr.read_line(&mut buf)?;
+      if len == 0 {
+        *more = false;
+        return Ok(());
       }
-      let level = match buf.chars().next() {
-        Some('+') => crate::logger::Level::Info,
-        Some('-') => crate::logger::Level::Warn,
-        Some('!') => crate::logger::Level::Error,
-        _ => return Err(std::io::ErrorKind::InvalidData.into()),
+      let level = match buf.chars().next().unwrap() {
+        '+' => crate::logger::Level::Info,
+        '-' => crate::logger::Level::Warn,
+        '!' => crate::logger::Level::Error,
+        char => {
+          return Err(error!(
+            std::io::Error::new(
+              std::io::ErrorKind::InvalidData,
+              format!("Invalid level glyph: '{char}'")
+            ),
+            "Native process provided invalid log entry: {}", buf
+          ))
+        }
       };
       log!(level, "{}", &buf[1..]);
     }
-    Ok(())
   };
-  while read_log().is_ok() {}
+  let mut more = true;
+  while more || proc.try_wait().transpose().is_none() {
+    if let Err(err) = read_log(&mut more) {
+      error!(err, "Failed to fetch error log from native process");
+    }
+  }
   let output = match proc.wait_with_output() {
     Ok(res) => res,
     Err(err) => {
@@ -143,10 +161,15 @@ fn execute_rundll32<'a>(function: &str, arguments: &[&str]) -> std::io::Result<V
       return Err(error!(err, "Failed to create process"));
     }
   };
-
   cleanupDelete.run();
   cleanupDirectory.run();
-  Ok(output.stdout)
+  let aligned: Vec<_> = output
+    .stdout
+    .chunks_exact(2)
+    .map(|w| u16::from_ne_bytes(unsafe { w.try_into().unwrap_unchecked() }))
+    .filter(|x| *x != 0)
+    .collect();
+  Ok(aligned)
 }
 
 fn invoke_class_installer(
@@ -174,11 +197,18 @@ fn invoke_class_installer(
   let instance_id = instance_id.display().to_string();
   let response = execute_rundll32(function, &[instance_id.as_str()])
     .map_err(|err| error!(err, "Error executing worker process: {}", instance_id))?;
-  let error_bytes: [u8; 4] = response.as_slice().try_into().ok().ok_or(error!(
-    ERROR_INVALID_PARAMETER,
-    "Incomplete response: {:?}", response
-  ))?;
-  let error = u32::from_be_bytes(error_bytes);
+  let resp_text = String::from_utf16(&response).map_err(|err| {
+    error!(
+      ERROR_INVALID_DATA,
+      "Failed to read process output ({err:?}): {:?}", response
+    )
+  })?;
+  let error = u32::from_str_radix(&resp_text, 16).map_err(|err| {
+    error!(
+      ERROR_INVALID_PARAMETER,
+      "Incomplete response ({err:?}): {}", resp_text
+    )
+  })?;
   if error != ERROR_SUCCESS {
     Err(std::io::Error::from_raw_os_error(error as i32))
   } else {

@@ -5,10 +5,9 @@ version = 3
 [[package]]
 name = "cutils"
 version = "0.1.0"
-source = "git+https://github.com/asakhar/cutils.git#22e4a7058df7a0a50542dc65c03f542b2de1703f"
+source = "git+https://github.com/asakhar/cutils.git#2f0a5819ea1ba7470cc72463930d4bf407a4020b"
 dependencies = [
  "cutils-macro",
- "get-last-error",
  "widestring",
  "winapi",
 ]
@@ -16,20 +15,11 @@ dependencies = [
 [[package]]
 name = "cutils-macro"
 version = "0.1.0"
-source = "git+https://github.com/asakhar/cutils-macro.git#58b757a4872fc48294ab447b357335207ebbc302"
+source = "git+https://github.com/asakhar/cutils-macro.git#d7053c268768162ab47b363804a2635fb76cac1f"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "get-last-error"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce85cdf2afb6a63ee6eb6ae445afb5772b1e47b009e1433750bd5d33bd30bb2c"
-dependencies = [
- "winapi",
 ]
 
 [[package]]
@@ -43,9 +33,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.31"
+version = "1.0.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fe8a65d69dd0808184ebb5f836ab526bb259db23c657efa38711b1072ee47f0"
+checksum = "50f3b39ccfb720540debaa0164757101c08ecb8d326b15358ce76a62c7e85965"
 dependencies = [
  "proc-macro2",
 ]
@@ -60,9 +50,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.26"
+version = "2.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45c3457aacde3c65315de5031ec191ce46604304d2446e803d71ade03308d970"
+checksum = "b60f673f44a8255b9c8c657daf66a596d435f2da81a555b06dc644d080ba45e0"
 dependencies = [
  "proc-macro2",
  "quote",

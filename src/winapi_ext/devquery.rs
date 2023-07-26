@@ -128,13 +128,13 @@ pub struct HDEVQUERY__ {
 pub type HDEVQUERY = *mut HDEVQUERY__;
 pub type PHDEVQUERY = *mut HDEVQUERY;
 pub type PDEV_QUERY_RESULT_CALLBACK = ::std::option::Option<
-  unsafe extern "C" fn(
+  unsafe extern "system" fn(
     hDevQuery: HDEVQUERY,
     pContext: PVOID,
     pActionData: *const DEV_QUERY_RESULT_ACTION_DATA,
   ),
 >;
-extern "C" {
+extern "system" {
   pub fn DevCreateObjectQuery(
     ObjectType: DEV_OBJECT_TYPE,
     QueryFlags: ULONG,
@@ -147,6 +147,6 @@ extern "C" {
     phDevQuery: PHDEVQUERY,
   ) -> HRESULT;
 }
-extern "C" {
+extern "system" {
   pub fn DevCloseObjectQuery(hDevQuery: HDEVQUERY);
 }

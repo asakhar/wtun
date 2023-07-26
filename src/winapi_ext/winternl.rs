@@ -54266,7 +54266,7 @@ fn bindgen_test_layout__KEY_VALUE_ENTRY() {
 }
 pub type KEY_VALUE_ENTRY = _KEY_VALUE_ENTRY;
 pub type PKEY_VALUE_ENTRY = *mut _KEY_VALUE_ENTRY;
-extern "C" {
+extern "system" {
   pub fn NtQueryMultipleValueKey(
     KeyHandle: HANDLE,
     ValueEntries: PKEY_VALUE_ENTRY,
@@ -54286,7 +54286,7 @@ pub const _KEY_SET_INFORMATION_CLASS_KeySetHandleTagsInformation: _KEY_SET_INFOR
 pub const _KEY_SET_INFORMATION_CLASS_MaxKeySetInfoClass: _KEY_SET_INFORMATION_CLASS = 6;
 pub type _KEY_SET_INFORMATION_CLASS = ::std::os::raw::c_int;
 pub use self::_KEY_SET_INFORMATION_CLASS as KEY_SET_INFORMATION_CLASS;
-extern "C" {
+extern "system" {
   pub fn NtSetInformationKey(
     KeyHandle: HANDLE,
     KeySetInformationClass: KEY_SET_INFORMATION_CLASS,
@@ -54294,7 +54294,7 @@ extern "C" {
     KeySetInformationLength: ULONG,
   ) -> NTSTATUS;
 }
-extern "C" {
+extern "system" {
   pub fn NtDeviceIoControlFile(
     FileHandle: HANDLE,
     Event: HANDLE,
@@ -54308,24 +54308,24 @@ extern "C" {
     OutputBufferLength: ULONG,
   ) -> NTSTATUS;
 }
-extern "C" {
+extern "system" {
   pub fn NtWaitForSingleObject(
     Handle: HANDLE,
     Alertable: BOOLEAN,
     Timeout: PLARGE_INTEGER,
   ) -> NTSTATUS;
 }
-extern "C" {
+extern "system" {
   pub fn RtlIsNameLegalDOS8Dot3(
     Name: PUNICODE_STRING,
     OemName: POEM_STRING,
     NameContainsSpaces: PBOOLEAN,
   ) -> BOOLEAN;
 }
-extern "C" {
+extern "system" {
   pub fn RtlNtStatusToDosError(Status: NTSTATUS) -> ULONG;
 }
-extern "C" {
+extern "system" {
   pub fn NtQueryInformationProcess(
     ProcessHandle: HANDLE,
     ProcessInformationClass: PROCESSINFOCLASS,
@@ -54334,7 +54334,7 @@ extern "C" {
     ReturnLength: PULONG,
   ) -> NTSTATUS;
 }
-extern "C" {
+extern "system" {
   pub fn NtQueryInformationThread(
     ThreadHandle: HANDLE,
     ThreadInformationClass: THREADINFOCLASS,
@@ -54343,7 +54343,7 @@ extern "C" {
     ReturnLength: PULONG,
   ) -> NTSTATUS;
 }
-extern "C" {
+extern "system" {
   pub fn NtSetInformationThread(
     ThreadHandle: HANDLE,
     ThreadInformationClass: THREADINFOCLASS,
@@ -54351,7 +54351,7 @@ extern "C" {
     ThreadInformationLength: ULONG,
   ) -> NTSTATUS;
 }
-extern "C" {
+extern "system" {
   pub fn NtQueryObject(
     Handle: HANDLE,
     ObjectInformationClass: OBJECT_INFORMATION_CLASS,
@@ -54360,7 +54360,7 @@ extern "C" {
     ReturnLength: PULONG,
   ) -> NTSTATUS;
 }
-extern "C" {
+extern "system" {
   pub fn NtQuerySystemInformation(
     SystemInformationClass: SYSTEM_INFORMATION_CLASS,
     SystemInformation: PVOID,
@@ -54368,50 +54368,50 @@ extern "C" {
     ReturnLength: PULONG,
   ) -> NTSTATUS;
 }
-extern "C" {
+extern "system" {
   pub fn NtQuerySystemTime(SystemTime: PLARGE_INTEGER) -> NTSTATUS;
 }
-extern "C" {
+extern "system" {
   pub fn NtQueryTimerResolution(
     MaximumTime: PULONG,
     MinimumTime: PULONG,
     CurrentTime: PULONG,
   ) -> NTSTATUS;
 }
-extern "C" {
+extern "system" {
   pub fn RtlLocalTimeToSystemTime(
     LocalTime: PLARGE_INTEGER,
     SystemTime: PLARGE_INTEGER,
   ) -> NTSTATUS;
 }
-extern "C" {
+extern "system" {
   pub fn RtlTimeToSecondsSince1970(Time: PLARGE_INTEGER, ElapsedSeconds: PULONG) -> BOOLEAN;
 }
-extern "C" {
+extern "system" {
   pub fn RtlFreeAnsiString(AnsiString: PANSI_STRING);
 }
-extern "C" {
+extern "system" {
   pub fn RtlFreeUnicodeString(UnicodeString: PUNICODE_STRING);
 }
-extern "C" {
+extern "system" {
   pub fn RtlFreeOemString(OemString: POEM_STRING);
 }
-extern "C" {
+extern "system" {
   pub fn RtlInitString(DestinationString: PSTRING, SourceString: PCSZ);
 }
-extern "C" {
+extern "system" {
   pub fn RtlInitStringEx(DestinationString: PSTRING, SourceString: PCSZ) -> NTSTATUS;
 }
-extern "C" {
+extern "system" {
   pub fn RtlInitAnsiString(DestinationString: PANSI_STRING, SourceString: PCSZ);
 }
-extern "C" {
+extern "system" {
   pub fn RtlInitAnsiStringEx(DestinationString: PANSI_STRING, SourceString: PCSZ) -> NTSTATUS;
 }
-extern "C" {
+extern "system" {
   pub fn RtlInitUnicodeString(DestinationString: PUNICODE_STRING, SourceString: PCWSTR);
 }
-extern "C" {
+extern "system" {
   pub fn RtlAnsiStringToUnicodeString(
     DestinationString: PUNICODE_STRING,
     SourceString: PCANSI_STRING,

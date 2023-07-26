@@ -63,7 +63,7 @@ pub type PKEY_NAME_INFORMATION = *mut KEY_NAME_INFORMATION;
 
 pub const STATUS_INFO_LENGTH_MISMATCH: NTSTATUS = 0xC0000004u32 as NTSTATUS;
 
-extern "C" {
+extern "system" {
   // We can't use RtlGetVersion, because appcompat's aclayers.dll shims it to report Vista
   // when run from legacy contexts. So, we instead use the undocumented RtlGetNtVersionNumbers.
   //

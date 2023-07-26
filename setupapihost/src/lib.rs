@@ -1,6 +1,6 @@
 use std::ptr::null_mut;
 
-use cutils::{check_handle, csizeof, defer, unsafe_defer};
+use cutils::{check_handle, csizeof, defer, strings::WideCStr, unsafe_defer};
 use winapi::{
   shared::{
     devguid::GUID_DEVCLASS_NET,
@@ -24,16 +24,54 @@ use winapi::{
   },
 };
 
+fn write_formatted(handle: u32, msg: &WideCStr) {
+  let mut msg_size = msg.sizeof();
+  unsafe {
+    winapi::um::fileapi::WriteFile(
+      winapi::um::processenv::GetStdHandle(handle),
+      msg.as_ptr().cast(),
+      msg_size,
+      &mut msg_size,
+      null_mut(),
+    );
+  }
+}
+
+macro_rules! error {
+  ($fmt:literal $(,$args:expr)*) => {
+    let msg = cutils::widecstring!("{}", format_args!(concat!("!", $fmt) $(,$args)*));
+    write_formatted(winapi::um::winbase::STD_ERROR_HANDLE, &msg);
+  };
+}
+macro_rules! info {
+  ($fmt:literal $(,$args:expr)*) => {
+    let msg = cutils::widecstring!("{}", format_args!(concat!("+", $fmt) $(,$args)*));
+    write_formatted(winapi::um::winbase::STD_ERROR_HANDLE, &msg);
+  };
+}
+macro_rules! warn {
+  ($fmt:literal $(,$args:expr)*) => {
+    let msg = cutils::widecstring!("{}", format_args!(concat!("-", $fmt) $(,$args)*));
+    write_formatted(winapi::um::winbase::STD_ERROR_HANDLE, &msg);
+  };
+}
+macro_rules! owrite {
+  ($fmt:literal $(,$args:expr)*) => {
+    let msg = cutils::widecstring!($fmt $(,$args)*);
+    write_formatted(winapi::um::winbase::STD_OUTPUT_HANDLE, &msg);
+  };
+}
+
 fn set_no_error() {
   unsafe { SetLastError(ERROR_SUCCESS) };
 }
 
 fn print_last_error() {
-  print!("{:x}", unsafe { GetLastError() });
+  owrite!("{:08x}", unsafe { GetLastError() });
 }
 
 #[no_mangle]
-unsafe extern "C" fn RemoveInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
+pub unsafe extern "system" fn RemoveInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
   let mut argc = 0;
   let argvp = CommandLineToArgvW(GetCommandLineW(), &mut argc);
   unsafe_defer! { cleanup <-
@@ -41,6 +79,7 @@ unsafe extern "C" fn RemoveInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
   }
   set_no_error();
   if argc < 3 {
+    error!("Invalid arguments.");
     return;
   }
   defer! {
@@ -48,9 +87,14 @@ unsafe extern "C" fn RemoveInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
   }
   let argv = std::slice::from_raw_parts(argvp, argc as usize);
   let instance_id = argv[2];
+  info!(
+    "Removing instance: {}",
+    WideCStr::from_ptr(instance_id).display()
+  );
   let dev_info =
     SetupDiCreateDeviceInfoListExW(&GUID_DEVCLASS_NET, null_mut(), null_mut(), null_mut());
   if !check_handle(dev_info) {
+    error!("Failed to create dev info.");
     return;
   }
   unsafe_defer! { cleanup_dev_info <-
@@ -95,7 +139,7 @@ unsafe extern "C" fn RemoveInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
 }
 
 #[no_mangle]
-unsafe extern "C" fn EnableInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
+pub unsafe extern "system" fn EnableInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
   let mut argc = 0;
   let argvp = CommandLineToArgvW(GetCommandLineW(), &mut argc);
   unsafe_defer! { cleanup <-
@@ -103,6 +147,7 @@ unsafe extern "C" fn EnableInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
   }
   set_no_error();
   if argc < 3 {
+    error!("Invalid arguments.");
     return;
   }
   defer! {
@@ -158,7 +203,7 @@ unsafe extern "C" fn EnableInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
 }
 
 #[no_mangle]
-unsafe extern "C" fn DisableInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
+pub unsafe extern "system" fn DisableInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
   let mut argc = 0;
   let argvp = CommandLineToArgvW(GetCommandLineW(), &mut argc);
   unsafe_defer! { cleanup <-
@@ -166,6 +211,7 @@ unsafe extern "C" fn DisableInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
   }
   set_no_error();
   if argc < 3 {
+    error!("Invalid arguments.");
     return;
   }
   defer! {
@@ -222,7 +268,7 @@ unsafe extern "C" fn DisableInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
 
 #[cfg(feature = "windows7")]
 #[no_mangle]
-unsafe extern "C" fn CreateInstanceWin7(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
+pub unsafe extern "system" fn CreateInstanceWin7(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32) {
   use cutils::{static_widecstr, strings::StaticWideCStr};
   use winapi::{
     shared::minwindef::TRUE,
@@ -241,7 +287,7 @@ unsafe extern "C" fn CreateInstanceWin7(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32
   set_no_error();
   let mut instance_id = StaticWideCStr::<MAX_DEVICE_ID_LEN>::zeroed();
   unsafe_defer! { cleanup <-
-    print!("{:x} {}", GetLastError(), "\"\"");
+    owrite!("{:08x} {}", GetLastError(), "\"\"");
   }
   let dev_info =
     SetupDiCreateDeviceInfoListExW(&GUID_DEVCLASS_NET, null_mut(), null_mut(), null_mut());
@@ -349,5 +395,5 @@ unsafe extern "C" fn CreateInstanceWin7(_: HWND, _: HINSTANCE, _: LPCSTR, _: i32
   cleaunp_driver_info.run();
   cleanup_dev_info.run();
   cleanup.forget();
-  print!("{:x} {}", ERROR_SUCCESS, instance_id.display());
+  owrite!("{:08x} {}", ERROR_SUCCESS, instance_id.display());
 }

@@ -9,7 +9,7 @@ crate-type = ["cdylib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-winapi = { version = "0.3.9", features = ["windef", "processenv", "shellapi", "setupapi", "devguid"] }
+winapi = { version = "0.3.9", features = ["windef", "processenv", "shellapi", "setupapi", "devguid", "winbase"] }
 cutils = { git = "https://github.com/asakhar/cutils.git" }
 
 [features]

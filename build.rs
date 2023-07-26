@@ -4,7 +4,7 @@ use std::{
 };
 
 fn main() {
-  let additional_deps = "Cfgmgr32.lib;Iphlpapi.lib;onecore.lib;ntdll.lib;Setupapi.lib;shlwapi.lib;swdevice.lib;version.lib".split(';');
+  let additional_deps = "Cfgmgr32.lib;OneCoreUAP.lib;Iphlpapi.lib;onecore.lib;ntdll.lib;Setupapi.lib;shlwapi.lib;swdevice.lib;version.lib".split(';');
   for dep in additional_deps {
     println!(
       "cargo:rustc-link-lib={}",
@@ -49,16 +49,18 @@ fn main() {
     }
     let mut command = Command::new(env!("CARGO"));
     let command = command
-    .stderr(Stdio::piped())
+      .stderr(Stdio::piped())
       .stdout(Stdio::piped())
       .current_dir("setupapihost")
       .arg("build")
       .arg(format!(
         "--target-dir={}/setupapihost",
         std::env::var("OUT_DIR").unwrap()
-      ));
-      toggle_windows7!(command);
-      toggle_release!(command);
+      ))
+      // .arg("--target=i686-pc-windows-msvc")
+      ;
+    toggle_windows7!(command);
+    toggle_release!(command);
 
     let output = command.spawn().unwrap().wait_with_output().unwrap();
     if !output.status.success() {

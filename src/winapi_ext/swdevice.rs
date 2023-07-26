@@ -7,10 +7,10 @@ use winapi::{
   um::winnt::SECURITY_DESCRIPTOR,
 };
 
-extern "C" {
+extern "system" {
   pub fn SwDeviceClose(hSwDevice: HSWDEVICE);
 }
-extern "C" {
+extern "system" {
   pub fn SwDeviceCreate(
     pszEnumeratorName: PCWSTR,
     pszParentDeviceInstance: PCWSTR,
@@ -57,7 +57,7 @@ pub struct SW_DEVICE_CREATE_INFO {
 pub type PSW_DEVICE_CREATE_INFO = *mut SW_DEVICE_CREATE_INFO;
 
 pub type SW_DEVICE_CREATE_CALLBACK = ::std::option::Option<
-  unsafe extern "C" fn(
+  unsafe extern "system" fn(
     hSwDevice: HSWDEVICE,
     CreateResult: HRESULT,
     pContext: PVOID,

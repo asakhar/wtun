@@ -6,8 +6,8 @@ use cutils::ignore::ResultIgnoreExt;
 use cutils::inspection::{CastToMutVoidPtrExt, GetPtrExt, InitZeroed};
 use cutils::strings::{StaticWideCStr, WideCStr, WideCString};
 use cutils::{
-  check_handle, csizeof, defer, guid_eq, static_widecstr, unsafe_defer, wide_array, widecstr,
-  Win32ErrorFromCrExt, Win32ErrorToResultExt,
+  check_handle, csizeof, defer, guid_eq, static_widecstr, unsafe_defer, widecstr,
+  ErrorFromCrExt,
 };
 use get_last_error::Win32Error;
 use winapi::shared::basetsd::INT32;
@@ -65,10 +65,12 @@ use winapi::um::winnt::{
 use winapi::um::winreg::RegSetValueExW;
 use winapi::DEFINE_GUID;
 
-use crate::adapter_win7::{create_adapter_post_win7, create_adapter_win7};
+use crate::adapter_win7::{
+  cleanup_orphaned_devices_win7, create_adapter_post_win7, create_adapter_win7,
+};
 use crate::driver::{DriverInstall, DriverInstallDeferredCleanup};
 use crate::logger::LoggerGetRegistryKeyPath;
-use crate::logger::{error, last_error, info, log};
+use crate::logger::{error, info, last_error, log};
 use crate::namespace::SystemNamedMutexLock;
 use crate::nci::SetConnectionName;
 use crate::registry::{RegKey, RegistryQueryDWORD, RegistryQueryString};
@@ -334,7 +336,7 @@ pub fn WintunCreateAdapter<T: ConstructsAndProvidesAdapter>(
   };
   if result != CR_SUCCESS {
     return Err(error!(
-      Win32Error::from_cr(result, ERROR_GEN_FAILURE),
+      std::io::Error::from_cr(result, ERROR_GEN_FAILURE),
       "Failed to locate root node name"
     ));
   }
@@ -348,7 +350,7 @@ pub fn WintunCreateAdapter<T: ConstructsAndProvidesAdapter>(
   };
   if result != CR_SUCCESS {
     return Err(error!(
-      Win32Error::from_cr(result, ERROR_GEN_FAILURE),
+      std::io::Error::from_cr(result, ERROR_GEN_FAILURE),
       "Failed to get root node name"
     ));
   }
@@ -655,7 +657,7 @@ fn WintunCreateAdapterStub(
   };
   if cret != CR_SUCCESS {
     return Err(error!(
-      Win32Error::from_cr(cret, ERROR_DEVICE_ENUMERATION_ERROR),
+      std::io::Error::from_cr(cret, ERROR_DEVICE_ENUMERATION_ERROR),
       "Failed to make stub device list"
     ));
   }
@@ -672,7 +674,7 @@ fn WintunCreateAdapterStub(
   };
   if cret != CR_SUCCESS {
     return Err(error!(
-      Win32Error::from_cr(cret, ERROR_PNP_REGISTRY_ERROR),
+      std::io::Error::from_cr(cret, ERROR_PNP_REGISTRY_ERROR),
       "Failed to create software registry key"
     ));
   }
@@ -804,13 +806,14 @@ pub fn WintunOpenAdapter<T: ConstructsAndProvidesAdapter>(Name: &WideCStr) -> st
   }
   adapter_prov.DevInfo = DevInfo;
   adapter_prov.DevInfoData = DevInfoData;
-  let Ret = WaitForInterface(&adapter_prov.DevInstanceID).is_ok()
-    && PopulateAdapterData(&mut adapter_prov).is_ok();
-  adapter_prov.DevInfo = null_mut();
-  if !Ret {
-    return Err(last_error!("Failed to populate adapter"));
-    // goto cleanupDevInfo;
-  }
+  let adapter_prov_ptr = adapter_prov.get_mut_ptr();
+  unsafe_defer! { set_dev_info_to_null <-
+    last_error!("Failed to populate adapter");
+    (*adapter_prov_ptr).DevInfo = null_mut();
+  };
+  WaitForInterface(&adapter_prov.DevInstanceID)?;
+  PopulateAdapterData(&mut adapter_prov)?;
+  set_dev_info_to_null.forget();
   cleanupDevInfo.run();
   cleanupAdapter.forget();
   dev_install_mutex.release();
@@ -824,8 +827,8 @@ pub fn WintunCloseAdapter(Adapter: &mut Adapter) {
     unsafe { SwDeviceClose(Adapter.SwDevice) };
   }
   if !Adapter.DevInfo.is_null() {
-    if AdapterRemoveInstance(Adapter.DevInfo, Adapter.DevInfoData.get_mut_ptr()).is_err() {
-      last_error!("Failed to remove adapter when closing");
+    if let Err(err) = AdapterRemoveInstance(Adapter.DevInfo, Adapter.DevInfoData.get_mut_ptr()) {
+      error!(err, "Failed to remove adapter when closing");
     }
     unsafe { SetupDiDestroyDeviceInfoList(Adapter.DevInfo) };
   }
@@ -889,7 +892,8 @@ pub(crate) fn AdapterGetDeviceObjectFileName(
       CM_GET_DEVICE_INTERFACE_LIST_PRESENT,
     )
   };
-  if let Err(err) = Win32Error::from_cr(cr, ERROR_GEN_FAILURE).to_result() {
+  if cr != CR_SUCCESS {
+    let err = std::io::Error::from_cr(cr, ERROR_GEN_FAILURE);
     let err = error!(
       err,
       "Failed to query adapter {} associated instances size",
@@ -907,7 +911,8 @@ pub(crate) fn AdapterGetDeviceObjectFileName(
       CM_GET_DEVICE_INTERFACE_LIST_PRESENT,
     )
   };
-  if let Err(err) = Win32Error::from_cr(cr, ERROR_GEN_FAILURE).to_result() {
+  if cr != CR_SUCCESS {
+    let err = std::io::Error::from_cr(cr, ERROR_GEN_FAILURE);
     let err = error!(
       err,
       "Failed to get adapter {} associated instances",
@@ -943,7 +948,7 @@ impl Drop for WAIT_FOR_INTERFACE_CTX {
   }
 }
 
-pub(crate) unsafe extern "C" fn WaitForInterfaceCallback(
+pub(crate) unsafe extern "system" fn WaitForInterfaceCallback(
   _DevQuery: HDEVQUERY,
   Context: PVOID,
   ActionData: *const DEV_QUERY_RESULT_ACTION_DATA,
@@ -981,7 +986,7 @@ pub(crate) fn WaitForInterface(InstanceId: &WideCStr) -> std::io::Result<()> {
         CompKey: DEVPROPCOMPKEY {
           Key: DEVPKEY_Device_InstanceId,
           Store: DEVPROP_STORE_SYSTEM,
-          ..unsafe { InitZeroed::init_zeroed() }
+          LocaleName: null_mut(),
         },
         Type: DEVPROP_TYPE_STRING,
         Buffer: InstanceIdPtr.cast(),
@@ -994,7 +999,7 @@ pub(crate) fn WaitForInterface(InstanceId: &WideCStr) -> std::io::Result<()> {
         CompKey: DEVPROPCOMPKEY {
           Key: DEVPKEY_DeviceInterface_Enabled,
           Store: DEVPROP_STORE_SYSTEM,
-          ..unsafe { InitZeroed::init_zeroed() }
+          LocaleName: null_mut(),
         },
         Type: DEVPROP_TYPE_BOOLEAN,
         Buffer: devprop_true.get_mut_ptr().cast(),
@@ -1007,7 +1012,7 @@ pub(crate) fn WaitForInterface(InstanceId: &WideCStr) -> std::io::Result<()> {
         CompKey: DEVPROPCOMPKEY {
           Key: DEVPKEY_DeviceInterface_ClassGuid,
           Store: DEVPROP_STORE_SYSTEM,
-          ..unsafe { InitZeroed::init_zeroed() }
+          LocaleName: null_mut(),
         },
         Type: DEVPROP_TYPE_GUID,
         Buffer: guid_devinterface_net.get_mut_ptr().cast(),
@@ -1078,7 +1083,7 @@ impl Drop for SW_DEVICE_CREATE_CTX {
   }
 }
 
-pub(crate) unsafe extern "C" fn DeviceCreateCallback(
+pub(crate) unsafe extern "system" fn DeviceCreateCallback(
   _SwDevice: HSWDEVICE,
   CreateResult: HRESULT,
   Context: PVOID,
@@ -1253,9 +1258,8 @@ pub fn AdapterCleanupOrphanedDevices() {
     }
   };
 
-  #[cfg(win7)]
-  {
-    AdapterCleanupOrphanedDevicesWin7();
+  if unsafe { get_system_params().IsWindows7 } {
+    cleanup_orphaned_devices_win7();
     return;
   }
 
@@ -1279,8 +1283,8 @@ pub fn AdapterCleanupOrphanedDevices() {
   };
   let mut DevInfoData = unsafe {
     SP_DEVINFO_DATA {
-      cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as DWORD,
-      ..InitZeroed::init_zeroed()
+      cbSize: csizeof!(SP_DEVINFO_DATA),
+      ..std::mem::zeroed()
     }
   };
   for EnumIndex in 0.. {
@@ -1304,26 +1308,28 @@ pub fn AdapterCleanupOrphanedDevices() {
     if result == CR_SUCCESS && Status & DN_HAS_PROBLEM == 0 {
       continue;
     }
-    let mut PropType = unsafe { DEVPROPTYPE::init_zeroed() };
-    let mut Name = wide_array!["<unknown>"; MAX_ADAPTER_NAME];
-    const SIZE_OF_NAME: u32 = (std::mem::size_of::<WCHAR>() * MAX_ADAPTER_NAME) as u32;
-    let NamePtr = Name.as_mut_ptr() as *mut u8;
+    let mut PropType: DEVPROPTYPE = unsafe { std::mem::zeroed() };
+    let mut Name = static_widecstr!["<unknown>"; MAX_ADAPTER_NAME];
     unsafe {
       SetupDiGetDevicePropertyW(
         DevInfo,
         DevInfoData.get_mut_ptr(),
         DEVPKEY_Wintun_Name.get_const_ptr(),
         PropType.get_mut_ptr(),
-        NamePtr,
-        SIZE_OF_NAME,
+        Name.as_mut_ptr().cast(),
+        Name.sizeof(),
         null_mut(),
         0,
       )
     };
-    let result = AdapterRemoveInstance(DevInfo, DevInfoData.get_mut_ptr());
     let Name: &WideCStr = unsafe { Name.as_ref().try_into() }.unwrap_or(widecstr!("<unknown>"));
-    if result.is_err() {
-      last_error!("Failed to remove orphaned adapter \"{}\"", Name.display());
+    let result = AdapterRemoveInstance(DevInfo, DevInfoData.get_mut_ptr());
+    if let Err(err) = result {
+      error!(
+        err,
+        "Failed to remove orphaned adapter \"{}\"",
+        Name.display()
+      );
       continue;
     }
     log!(

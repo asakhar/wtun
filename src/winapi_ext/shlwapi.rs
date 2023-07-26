@@ -1,5 +1,5 @@
 use winapi::shared::ntdef::{LPCWSTR, LPWSTR};
 
-extern "C" {
+extern "system" {
   pub fn PathFindFileNameW(pszPath: LPCWSTR) -> LPWSTR;
 }
