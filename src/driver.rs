@@ -15,7 +15,8 @@ use winapi::{
     ntdef::{DWORDLONG, NT_SUCCESS, PVOID},
     ntstatus::STATUS_INFO_LENGTH_MISMATCH,
     winerror::{
-      ERROR_FILE_NOT_FOUND, ERROR_INVALID_DATA, ERROR_NO_MORE_ITEMS, ERROR_VERSION_PARSE_ERROR,
+      ERROR_FILE_NOT_FOUND, ERROR_INVALID_DATA, ERROR_NOT_SUPPORTED, ERROR_NO_MORE_ITEMS,
+      ERROR_VERSION_PARSE_ERROR,
     },
   },
   um::{
@@ -40,7 +41,7 @@ use crate::{
     AdapterCleanupOrphanedDevices, AdapterDisableInstance, AdapterEnableInstance,
     DEVPKEY_Wintun_Name, WINTUN_ENUMERATOR, WINTUN_HWID,
   },
-  logger::{error, last_error, info, log, warn, IntoError},
+  logger::{error, info, last_error, log, warn, IntoError},
   namespace::SystemNamedMutexLock,
   ntdll::{SystemModuleInformation, RTL_PROCESS_MODULES},
   resource::{copy_to_file, create_temp_dir, ResId},
@@ -50,6 +51,7 @@ use crate::{
     winternl::{NtQuerySystemInformation, RtlNtStatusToDosError},
   },
   wintun_inf::{WINTUN_INF_FILETIME, WINTUN_INF_VERSION},
+  wmain::get_system_params,
 };
 
 use std::collections::LinkedList;
@@ -406,7 +408,7 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
       }
       continue;
     }
-    let drv_info_data_driver_date =DrvInfoData.DriverDate; 
+    let drv_info_data_driver_date = DrvInfoData.DriverDate;
     if IsNewer(
       &WINTUN_INF_FILETIME,
       WINTUN_INF_VERSION,
@@ -520,9 +522,38 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
     drop(std::fs::remove_file(&sys_path));
     drop(std::fs::remove_file(&inf_path));
   };
-  copy_to_file(&cat_path, ResId::Cat)?;
-  copy_to_file(&sys_path, ResId::Sys)?;
-  copy_to_file(&inf_path, ResId::Inf)?;
+  //match native_machine {
+  //   #[cfg(any(feature = "build_amd64_gnu_wow64", feature = "build_amd64_msvc_wow64"))]
+  //   winapi::um::winnt::IMAGE_FILE_MACHINE_AMD64 => ResId::SetupApiHostAmd64,
+  //   #[cfg(feature = "build_arm64_msvc_wow64")]
+  //   winapi::um::winnt::IMAGE_FILE_MACHINE_ARM64 => ResId::SetupApiHostArm64,
+  //   _ => {
+  //     return Err(error!(
+  //       Win32Error::new(ERROR_NOT_SUPPORTED),
+  //       "Unsupported platform 0x{:x}", native_machine
+  //     ))
+  //   }
+  // };
+  let native_machine = unsafe { get_system_params().NativeMachine };
+  let (cat_res_id, sys_res_id, inf_res_id) = match native_machine {
+    winapi::um::winnt::IMAGE_FILE_MACHINE_AMD64 => {
+      (ResId::CatAmd64, ResId::SysAmd64, ResId::InfAmd64)
+    }
+    winapi::um::winnt::IMAGE_FILE_MACHINE_ARM64 => {
+      (ResId::CatArm64, ResId::SysArm64, ResId::InfArm64)
+    }
+    winapi::um::winnt::IMAGE_FILE_MACHINE_ARM => (ResId::CatArm, ResId::SysArm, ResId::InfArm),
+    winapi::um::winnt::IMAGE_FILE_MACHINE_I386 => (ResId::CatX86, ResId::SysX86, ResId::InfX86),
+    _ => {
+      return Err(error!(
+        ERROR_NOT_SUPPORTED,
+        "Unsupported platform 0x{:x}", native_machine
+      ))
+    }
+  };
+  copy_to_file(&cat_path, cat_res_id)?;
+  copy_to_file(&sys_path, sys_res_id)?;
+  copy_to_file(&inf_path, inf_res_id)?;
   info!("Installing driver");
   let inf_ptr = WideCString::from(inf_path.as_os_str());
   let result = unsafe {

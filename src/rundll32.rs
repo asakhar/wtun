@@ -1,7 +1,6 @@
 use std::io::BufRead;
 
 use cutils::{defer, files::get_windows_dir_path, inspection::GetPtrExt, strings::StaticWideCStr};
-use get_last_error::Win32Error;
 use winapi::{
   shared::{
     minwindef::FALSE,
@@ -13,7 +12,6 @@ use winapi::{
   um::{
     cfgmgr32::MAX_DEVICE_ID_LEN,
     setupapi::{SetupDiGetDeviceInstanceIdW, HDEVINFO, SP_DEVINFO_DATA},
-    winnt::{IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM64},
   },
 };
 
@@ -86,10 +84,13 @@ fn execute_rundll32(function: &str, arguments: &[&str]) -> std::io::Result<Vec<u
   let dll_path = random_temp_subdir.join("setupapihost.dll");
   let native_machine = unsafe { get_system_params().NativeMachine };
   let resource_id = match native_machine {
-    IMAGE_FILE_MACHINE_AMD64 | IMAGE_FILE_MACHINE_ARM64 => ResId::SetupApiHost,
+    #[cfg(any(feature = "build_amd64_gnu_wow64", feature = "build_amd64_msvc_wow64"))]
+    winapi::um::winnt::IMAGE_FILE_MACHINE_AMD64 => ResId::SetupApiHostAmd64,
+    #[cfg(feature = "build_arm64_msvc_wow64")]
+    winapi::um::winnt::IMAGE_FILE_MACHINE_ARM64 => ResId::SetupApiHostArm64,
     _ => {
       return Err(error!(
-        Win32Error::new(ERROR_NOT_SUPPORTED),
+        ERROR_NOT_SUPPORTED,
         "Unsupported platform 0x{:x}", native_machine
       ))
     }

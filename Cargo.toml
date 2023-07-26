@@ -53,7 +53,10 @@ simple_logger = "*"
 winres = { version = "*", optional = true }
 
 [features]
-default = ["windows10", "request_elevation"]
+default = ["windows10", "request_elevation", "build_amd64_msvc_wow64"]
+build_amd64_msvc_wow64 = []
+build_arm64_msvc_wow64 = []
+build_amd64_gnu_wow64 = []
 windows7 = []
 windows10 = []
 request_elevation = ["dep:winres"]

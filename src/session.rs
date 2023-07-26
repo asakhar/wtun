@@ -356,7 +356,7 @@ impl Session {
     let session_mut: &mut Session = unsafe { &mut *(*session_ptr).get() };
     unsafe { session_mut.recv.lock.init() };
     unsafe { session_mut.send.lock.init() };
-    drop(session_mut);
+    // drop(session_mut);
     session
   }
   pub fn close(self: Box<Session>) {
@@ -395,7 +395,7 @@ pub(crate) fn WintunStartSession<T: ConstrunctsAndProvidesSession>(
   {
     return Err(last_error!("Failed to register rings"));
   }
-  drop(session_mut);
+  // drop(session_mut);
   Ok(session)
 }
 
