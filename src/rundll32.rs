@@ -120,6 +120,7 @@ fn execute_rundll32(function: &str, arguments: &[&str]) -> std::io::Result<Vec<u
   };
   let stderr = proc.stderr.take().unwrap();
   let mut stderr = std::io::BufReader::new(stderr);
+  let target = format!("rundll32.exe::{function}");
   let mut read_log = |more: &mut bool| -> std::io::Result<()> {
     loop {
       let mut buf = String::new();
@@ -142,7 +143,7 @@ fn execute_rundll32(function: &str, arguments: &[&str]) -> std::io::Result<Vec<u
           ))
         }
       };
-      log::log!(target: "rundll32", level, "{}", &buf[1..]);
+      log::log!(target: &target, level, "{}", &buf[1..]);
     }
   };
   let mut more = true;
