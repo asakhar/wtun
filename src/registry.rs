@@ -1,7 +1,7 @@
 use cutils::{
   check_handle,
   inspection::GetPtrExt,
-  strings::{WideCStr, WideCString}, csizeof,
+  strings::{WideCStr, WideCString}, csizeof, ioeresult,
 };
 use winapi::{
   shared::{
@@ -106,7 +106,7 @@ pub fn registry_get_string(
   value_type: RegistryValueType,
 ) -> std::io::Result<WideCString> {
   if value.len() & 1 != 0 {
-    return Err(std::io::Error::from_raw_os_error(ERROR_INVALID_DATA as i32));
+    return ioeresult!(InvalidData, "Registry contained invalid utf16 string");
   }
   let value: Vec<u16> = value
     .chunks_exact(2)

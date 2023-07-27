@@ -4,7 +4,7 @@ use cutils::{
   inspection::GetPtrExt,
   static_widecstr,
   strings::{WideCStr, WideCString},
-  unsafe_defer, wide_array, widecstr, widecstring,
+  unsafe_defer, wide_array, widecstr, widecstring, ioeresult,
 };
 use winapi::{
   shared::{
@@ -15,7 +15,7 @@ use winapi::{
     ntdef::{DWORDLONG, NT_SUCCESS, PVOID},
     ntstatus::STATUS_INFO_LENGTH_MISMATCH,
     winerror::{
-      ERROR_FILE_NOT_FOUND, ERROR_NOT_SUPPORTED, ERROR_NO_MORE_ITEMS,
+      ERROR_NOT_SUPPORTED, ERROR_NO_MORE_ITEMS,
       ERROR_VERSION_PARSE_ERROR,
     },
   },
@@ -278,9 +278,7 @@ fn maybe_get_running_driver_version(
       return version_of_file(filepath.as_ref());
     }
   }
-  Err(std::io::Error::from_raw_os_error(
-    ERROR_FILE_NOT_FOUND as i32,
-  ))
+  ioeresult!(NotFound, "Driver not found")
 }
 
 pub fn get_running_driver_version() -> std::io::Result<DWORD> {

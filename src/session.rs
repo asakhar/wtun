@@ -10,7 +10,7 @@ use crate::{
   wmain::get_system_params,
   Adapter, PacketSize, MAX_IP_PACKET_SIZE,
 };
-use cutils::{check_handle, csizeof, inspection::GetPtrExt, unsafe_defer};
+use cutils::{check_handle, csizeof, inspection::GetPtrExt, unsafe_defer, ioeresult};
 use winapi::{
   shared::{
     minwindef::{DWORD, FALSE, TRUE, UCHAR, UINT, ULONG},
@@ -112,7 +112,7 @@ impl Event {
   fn new(security_attributes: &mut SECURITY_ATTRIBUTES) -> std::io::Result<Self> {
     let event = unsafe { CreateEventW(security_attributes, FALSE, FALSE, null_mut()) };
     if !check_handle(event) {
-      return Err(std::io::Error::last_os_error());
+      return Err(last_error!("Failed to create event"));
     }
     Ok(Self(event))
   }
@@ -130,7 +130,7 @@ impl Event {
       )
     };
     if !check_handle(event) {
-      return Err(std::io::Error::last_os_error());
+      return Err(last_error!("Failed to create event"));
     }
     Ok(Self(event))
   }
@@ -316,7 +316,7 @@ pub struct Session {
 impl Session {
   unsafe fn descriptor(&self) -> &mut TunRegisterRings {
     &mut *self.descriptor.get()
-  } 
+  }
 }
 
 unsafe impl Send for Session {}
@@ -406,10 +406,7 @@ impl Session {
       WAIT_OBJECT_0 => Ok(true),
       WAIT_TIMEOUT => Ok(false),
       WAIT_FAILED => Err(std::io::Error::last_os_error()),
-      other => Err(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        format!("WaitForSingleObject returned: {other}"),
-      )),
+      other => ioeresult!(Other, "WaitForSingleObject returned: {}", other),
     }
   }
   pub fn is_read_avaliable(&self) -> std::io::Result<bool> {
@@ -419,10 +416,7 @@ impl Session {
       WAIT_OBJECT_0 => Ok(true),
       WAIT_TIMEOUT => Ok(false),
       WAIT_FAILED => Err(std::io::Error::last_os_error()),
-      other => Err(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        format!("WaitForSingleObject returned: {other}"),
-      )),
+      other => ioeresult!(Other, "WaitForSingleObject returned: {}", other),
     }
   }
   pub fn block_until_read_avaliable(
@@ -445,12 +439,9 @@ impl Session {
     let res = unsafe { WaitForSingleObject(read_event.0, millis) };
     match res {
       WAIT_OBJECT_0 => Ok(()),
-      WAIT_TIMEOUT => Err(std::io::ErrorKind::TimedOut.into()),
+      WAIT_TIMEOUT => ioeresult!(TimedOut, "WaitForSingleObject timed out"),
       WAIT_FAILED => Err(std::io::Error::last_os_error()),
-      other => Err(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        format!("WaitForSingleObject returned: {other}"),
-      )),
+      other => ioeresult!(Other, "WaitForSingleObject returned: {}", other),
     }
   }
   pub fn block_until_write_avaliable(
@@ -473,12 +464,9 @@ impl Session {
     let res = unsafe { WaitForSingleObject(write_event.0, millis) };
     match res {
       WAIT_OBJECT_0 => Ok(()),
-      WAIT_TIMEOUT => Err(std::io::ErrorKind::TimedOut.into()),
+      WAIT_TIMEOUT => ioeresult!(TimedOut, "WaitForSingleObject timed out"),
       WAIT_FAILED => Err(std::io::Error::last_os_error()),
-      other => Err(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        format!("WaitForSingleObject returned: {other}"),
-      )),
+      other => ioeresult!(Other, "WaitForSingleObject returned: {}", other),
     }
   }
   pub fn get_read_wait_event(&self) -> &Event {
@@ -628,10 +616,12 @@ impl<'a> Drop for RecvPacket<'a> {
       };
       unsafe { *session.send.packets_to_release.get() -= 1 };
     }
-    unsafe { session.descriptor().send.ring().head.store(
-      unsafe { *session.send.head_release.get() },
-      Ordering::Release,
-    ) };
+    unsafe {
+      session.descriptor().send.ring().head.store(
+        unsafe { *session.send.head_release.get() },
+        Ordering::Release,
+      )
+    };
     guard.leave();
   }
 }
@@ -753,21 +743,30 @@ impl<'a> Drop for SendPacket<'a> {
       };
       unsafe { *session.recv.packets_to_release.get() -= 1 };
     }
-    if unsafe { session.descriptor().recv.ring().tail.load(Ordering::Relaxed) }
-      != unsafe { *session.recv.tail_release.get() }
-    {
-      unsafe { session.descriptor().recv.ring().tail.store(
-        unsafe { *session.recv.tail_release.get() },
-        Ordering::Release,
-      ) };
-      unsafe { SetEvent(session.recv_tail_moved.0) };
-      if unsafe { session
+    if unsafe {
+      session
         .descriptor()
         .recv
         .ring()
-        .alertable
-        .load(Ordering::Acquire) }
-        != 0
+        .tail
+        .load(Ordering::Relaxed)
+    } != unsafe { *session.recv.tail_release.get() }
+    {
+      unsafe {
+        session.descriptor().recv.ring().tail.store(
+          unsafe { *session.recv.tail_release.get() },
+          Ordering::Release,
+        )
+      };
+      unsafe { SetEvent(session.recv_tail_moved.0) };
+      if unsafe {
+        session
+          .descriptor()
+          .recv
+          .ring()
+          .alertable
+          .load(Ordering::Acquire)
+      } != 0
       {
         unsafe { SetEvent(session.descriptor().recv.tail_moved.0) };
       }
