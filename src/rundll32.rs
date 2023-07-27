@@ -33,6 +33,8 @@ pub(crate) fn enable_instance(
 ) -> std::io::Result<()> {
   invoke_class_installer("enable", "EnableInstance", dev_info, dev_info_data)
 }
+
+#[allow(dead_code)]
 pub(crate) fn disable_instance(
   dev_info: HDEVINFO,
   dev_info_data: *mut SP_DEVINFO_DATA,

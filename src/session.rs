@@ -37,18 +37,18 @@ const TUN_ALIGNMENT: ULONG = csizeof!(ULONG);
 pub(crate) const fn tun_align(size: ULONG) -> ULONG {
   (size.wrapping_add(TUN_ALIGNMENT.wrapping_sub(1))) & !(TUN_ALIGNMENT.wrapping_sub(1))
 }
-pub(crate) fn tun_is_aligned(size: ULONG) -> bool {
-  (size & (TUN_ALIGNMENT.wrapping_sub(1))) == 0
-}
+// pub(crate) fn tun_is_aligned(size: ULONG) -> bool {
+//   (size & (TUN_ALIGNMENT.wrapping_sub(1))) == 0
+// }
 const TUN_PACKET_SIZE: ULONG = csizeof!(TunPacket);
 const TUN_RING_SIZE: ULONG = csizeof!(TunRing);
 const TUN_MAX_PACKET_SIZE: ULONG = tun_align(TUN_PACKET_SIZE.wrapping_add(MAX_IP_PACKET_SIZE));
-pub(crate) const fn tun_ring_capacity(size: usize) -> ULONG {
-  let size = size as ULONG;
-  size
-    .wrapping_sub(TUN_RING_SIZE)
-    .wrapping_sub(TUN_MAX_PACKET_SIZE.wrapping_sub(TUN_ALIGNMENT))
-}
+// pub(crate) const fn tun_ring_capacity(size: usize) -> ULONG {
+//   let size = size as ULONG;
+//   size
+//     .wrapping_sub(TUN_RING_SIZE)
+//     .wrapping_sub(TUN_MAX_PACKET_SIZE.wrapping_sub(TUN_ALIGNMENT))
+// }
 pub(crate) const fn tun_ring_size(capacity: ULONG) -> usize {
   (TUN_RING_SIZE
     .wrapping_add(capacity)
@@ -327,14 +327,6 @@ impl std::fmt::Debug for Session {
 }
 
 impl Session {
-  fn new(
-    recv_tail_moved: Event,
-    descriptor: TunRegisterRings,
-    handle: ObjectHandle,
-    capacity: ULONG,
-  ) -> Box<Self> {
-    Self::new_wrapped(recv_tail_moved, descriptor, handle, capacity)
-  }
   fn new_wrapped<T: ConstrunctsAndProvidesSession>(
     recv_tail_moved: Event,
     descriptor: TunRegisterRings,

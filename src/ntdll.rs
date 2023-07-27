@@ -31,7 +31,7 @@ impl RTL_PROCESS_MODULE_INFORMATION {
     unsafe { CStr::from_bytes_until_nul(&self.FullPathName) }.ok()
   }
 }
-
+#[allow(dead_code)]
 pub type PRTL_PROCESS_MODULE_INFORMATION = *mut RTL_PROCESS_MODULE_INFORMATION;
 
 #[repr(C)]
@@ -49,6 +49,7 @@ impl RTL_PROCESS_MODULES {
   }
 }
 
+#[allow(dead_code)]
 pub type PRTL_PROCESS_MODULES = *mut RTL_PROCESS_MODULES;
 #[repr(C)]
 pub struct KEY_NAME_INFORMATION {
@@ -59,8 +60,10 @@ pub struct KEY_NAME_INFORMATION {
 impl KEY_NAME_INFORMATION {
   pub const OFFSETOF_NAME: usize = std::mem::size_of::<ULONG>();
 }
-pub type PKEY_NAME_INFORMATION = *mut KEY_NAME_INFORMATION;
 
+#[allow(dead_code)]
+pub type PKEY_NAME_INFORMATION = *mut KEY_NAME_INFORMATION;
+#[allow(dead_code)]
 pub const STATUS_INFO_LENGTH_MISMATCH: NTSTATUS = 0xC0000004u32 as NTSTATUS;
 
 extern "system" {
@@ -92,6 +95,7 @@ pub struct NtVersionNumbers {
   BuildNumber: DWORD,
 }
 
+#[allow(dead_code)]
 pub fn rtl_get_nt_version_numbers() -> NtVersionNumbers {
   let mut version = NtVersionNumbers {
     MajorVersion: 0,

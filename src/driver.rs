@@ -1,11 +1,11 @@
 use cutils::{
   check_handle, csizeof, defer,
-  inspection::{CastToMutVoidPtrExt, GetPtrExt, InitZeroed},
+  errors::get_last_error_code,
+  inspection::GetPtrExt,
   static_widecstr,
   strings::{WideCStr, WideCString},
   unsafe_defer, wide_array, widecstr, widecstring,
 };
-use get_last_error::Win32Error;
 use winapi::{
   shared::{
     cfg::{CM_PROB_DISABLED, DN_HAS_PROBLEM},
@@ -15,7 +15,7 @@ use winapi::{
     ntdef::{DWORDLONG, NT_SUCCESS, PVOID},
     ntstatus::STATUS_INFO_LENGTH_MISMATCH,
     winerror::{
-      ERROR_FILE_NOT_FOUND, ERROR_INVALID_DATA, ERROR_NOT_SUPPORTED, ERROR_NO_MORE_ITEMS,
+      ERROR_FILE_NOT_FOUND, ERROR_NOT_SUPPORTED, ERROR_NO_MORE_ITEMS,
       ERROR_VERSION_PARSE_ERROR,
     },
   },
@@ -79,7 +79,7 @@ fn DisableAllOurAdapters(
       }
       continue;
     }
-    let mut prop_type = unsafe { DEVPROPTYPE::init_zeroed() };
+    let mut prop_type: DEVPROPTYPE = unsafe { std::mem::zeroed() };
     let mut name = static_widecstr!["<unknown>"; MAX_ADAPTER_NAME];
     unsafe {
       SetupDiGetDevicePropertyW(
@@ -107,9 +107,6 @@ fn DisableAllOurAdapters(
     {
       continue;
     }
-    let name: &WideCStr = unsafe { name.as_ref().try_into() }
-      .ok()
-      .ok_or(Win32Error::new(ERROR_INVALID_DATA))?;
     log!(
       crate::logger::Level::Info,
       "Disabling adapter \"{}\"",
@@ -133,7 +130,7 @@ fn EnableAllOurAdapters(
 ) -> std::io::Result<()> {
   let mut overall_result = Ok(());
   for device in AdaptersToEnable {
-    let mut prop_type = unsafe { DEVPROPTYPE::init_zeroed() };
+    let mut prop_type: DEVPROPTYPE = 0;
     let mut name = static_widecstr!["<unknown>"; MAX_ADAPTER_NAME];
     unsafe {
       SetupDiGetDevicePropertyW(
@@ -147,9 +144,6 @@ fn EnableAllOurAdapters(
         0,
       )
     };
-    let name: &WideCStr = unsafe { name.as_ref().try_into() }
-      .ok()
-      .ok_or(Win32Error::new(ERROR_INVALID_DATA))?;
     info!("Enabling adapter: \"{}\"", name.display());
     if let Err(err) = AdapterEnableInstance(DevInfo, device.get_mut_ptr()) {
       let err = error!(err, "Failed to enable adapter \"{}\"", name.display());
@@ -247,7 +241,7 @@ fn MaybeGetRunningDriverVersion(
     let status = unsafe {
       NtQuerySystemInformation(
         SystemModuleInformation,
-        modules_buf.as_mut_ptr().cast_to_pvoid(),
+        modules_buf.as_mut_ptr().cast(),
         buffer_size,
         buffer_size.get_mut_ptr(),
       )
@@ -260,7 +254,7 @@ fn MaybeGetRunningDriverVersion(
       continue;
     }
     return Err(error!(
-      Win32Error::new(unsafe { RtlNtStatusToDosError(status) }),
+      unsafe { RtlNtStatusToDosError(status) },
       "Failed to enumerate drivers"
     ));
   }
@@ -379,7 +373,7 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
   }
   let DevInfoDataPtr = DevInfoData.get_mut_ptr();
   unsafe_defer! { cleanupDriverInfoList <- SetupDiDestroyDriverInfoList(DevInfo, DevInfoDataPtr, SPDIT_COMPATDRIVER); };
-  let mut driver_date = unsafe { FILETIME::init_zeroed() };
+  let mut driver_date: FILETIME = unsafe { std::mem::zeroed() };
   let mut driver_version = 0;
   let mut dev_info_existing_adapters = INVALID_HANDLE_VALUE;
   let dev_info_existing_adapters_ptr = dev_info_existing_adapters.get_mut_ptr();
@@ -403,7 +397,7 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
       )
     };
     if result == FALSE {
-      if Win32Error::get_last_error().code() == ERROR_NO_MORE_ITEMS {
+      if get_last_error_code() == ERROR_NO_MORE_ITEMS {
         break;
       }
       continue;
@@ -508,7 +502,7 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
   defer! { cleanupDirectory <-
     if let Err(err) = std::fs::remove_dir_all(&random_temp_sub_dir) {
       error!(
-        Win32Error::new(err.raw_os_error().unwrap() as u32),
+        err,
         "Failed to remove temp directory"
       );
     }
@@ -522,18 +516,6 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
     drop(std::fs::remove_file(&sys_path));
     drop(std::fs::remove_file(&inf_path));
   };
-  //match native_machine {
-  //   #[cfg(any(feature = "build_amd64_gnu_wow64", feature = "build_amd64_msvc_wow64"))]
-  //   winapi::um::winnt::IMAGE_FILE_MACHINE_AMD64 => ResId::SetupApiHostAmd64,
-  //   #[cfg(feature = "build_arm64_msvc_wow64")]
-  //   winapi::um::winnt::IMAGE_FILE_MACHINE_ARM64 => ResId::SetupApiHostArm64,
-  //   _ => {
-  //     return Err(error!(
-  //       Win32Error::new(ERROR_NOT_SUPPORTED),
-  //       "Unsupported platform 0x{:x}", native_machine
-  //     ))
-  //   }
-  // };
   let native_machine = unsafe { get_system_params().NativeMachine };
   let (cat_res_id, sys_res_id, inf_res_id) = match native_machine {
     winapi::um::winnt::IMAGE_FILE_MACHINE_AMD64 => {
@@ -652,7 +634,7 @@ pub fn WintunDeleteDriver() -> std::io::Result<()> {
       )
     };
     if result == FALSE {
-      if Win32Error::get_last_error().code() == ERROR_NO_MORE_ITEMS {
+      if get_last_error_code() == ERROR_NO_MORE_ITEMS {
         break;
       }
       continue;

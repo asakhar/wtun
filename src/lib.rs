@@ -1,5 +1,4 @@
-#![allow(dead_code, unused_unsafe)]
-#![allow(non_upper_case_globals, non_camel_case_types, non_snake_case)]
+#![allow(unused_unsafe)]
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 pub use winapi::shared::ifdef::NET_LUID;
@@ -24,7 +23,8 @@ mod wintun_inf;
 mod wmain;
 
 pub use adapter::{Adapter, ConstructsAndProvidesAdapter};
-pub use driver::get_running_driver_version;
+pub use driver::{get_running_driver_version, WintunDeleteDriver as delete_driver};
+pub use namespace::NamespaceDone as deinit_namespace;
 pub use session::{
   Event, IoError, RecvPacket, RecvPacketRead, SendPacket, SendPacketWrite, Session,
 };

@@ -8,10 +8,8 @@ use winapi::{
 };
 
 extern "system" {
-  pub fn SwDeviceClose(hSwDevice: HSWDEVICE);
-}
-extern "system" {
-  pub fn SwDeviceCreate(
+  pub(crate) fn SwDeviceClose(hSwDevice: HSWDEVICE);
+  pub(crate) fn SwDeviceCreate(
     pszEnumeratorName: PCWSTR,
     pszParentDeviceInstance: PCWSTR,
     pCreateInfo: *const SW_DEVICE_CREATE_INFO,
@@ -22,41 +20,35 @@ extern "system" {
     phSwDevice: PHSWDEVICE,
   ) -> HRESULT;
 }
-pub const None: SW_DEVICE_CAPABILITIES = 0;
-pub const Removable: SW_DEVICE_CAPABILITIES = 1;
-pub const SilentInstall: SW_DEVICE_CAPABILITIES = 2;
-pub const NoDisplayInUI: SW_DEVICE_CAPABILITIES = 4;
-pub const DriverRequired: SW_DEVICE_CAPABILITIES = 8;
+pub(crate) const SilentInstall: SW_DEVICE_CAPABILITIES = 2;
+pub(crate) const DriverRequired: SW_DEVICE_CAPABILITIES = 8;
 
-pub type SW_DEVICE_CAPABILITIES = ::std::ffi::c_uint;
-pub type PSW_DEVICE_CAPABILITIES = *mut SW_DEVICE_CAPABILITIES;
+pub(crate) type SW_DEVICE_CAPABILITIES = ::std::ffi::c_uint;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct HSWDEVICE__ {
-  pub unused: ::std::os::raw::c_int,
+pub(crate) struct HSWDEVICE__ {
+  pub(crate) unused: ::std::os::raw::c_int,
 }
 
-pub type HSWDEVICE = *mut HSWDEVICE__;
-pub type PHSWDEVICE = *mut HSWDEVICE;
+pub(crate) type HSWDEVICE = *mut HSWDEVICE__;
+pub(crate) type PHSWDEVICE = *mut HSWDEVICE;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct SW_DEVICE_CREATE_INFO {
-  pub cbSize: ULONG,
-  pub pszInstanceId: PCWSTR,
-  pub pszzHardwareIds: PCZZWSTR,
-  pub pszzCompatibleIds: PCZZWSTR,
-  pub pContainerId: *const GUID,
-  pub CapabilityFlags: ULONG,
-  pub pszDeviceDescription: PCWSTR,
-  pub pszDeviceLocation: PCWSTR,
-  pub pSecurityDescriptor: *const SECURITY_DESCRIPTOR,
+pub(crate) struct SW_DEVICE_CREATE_INFO {
+  pub(crate) cbSize: ULONG,
+  pub(crate) pszInstanceId: PCWSTR,
+  pub(crate) pszzHardwareIds: PCZZWSTR,
+  pub(crate) pszzCompatibleIds: PCZZWSTR,
+  pub(crate) pContainerId: *const GUID,
+  pub(crate) CapabilityFlags: ULONG,
+  pub(crate) pszDeviceDescription: PCWSTR,
+  pub(crate) pszDeviceLocation: PCWSTR,
+  pub(crate) pSecurityDescriptor: *const SECURITY_DESCRIPTOR,
 }
 
-pub type PSW_DEVICE_CREATE_INFO = *mut SW_DEVICE_CREATE_INFO;
-
-pub type SW_DEVICE_CREATE_CALLBACK = ::std::option::Option<
+pub(crate) type SW_DEVICE_CREATE_CALLBACK = ::std::option::Option<
   unsafe extern "system" fn(
     hSwDevice: HSWDEVICE,
     CreateResult: HRESULT,

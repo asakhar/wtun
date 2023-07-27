@@ -3,8 +3,7 @@ use std::{
   path::{Path, PathBuf},
 };
 
-use cutils::files::get_windows_dir_path;
-use get_last_error::Win32Error;
+use cutils::{files::get_windows_dir_path, ioeresult};
 use rand::Rng;
 
 use crate::logger::error;
@@ -117,18 +116,10 @@ pub fn copy_to_file(dst: &Path, id: ResId) -> std::io::Result<()> {
     #[cfg(feature = "build_arm64_msvc_wow64")]
     ResId::SetupApiHostArm64 => WINTUN_SETUP_API_HOST_ARM64,
   };
-  std::fs::File::create(dst)
-    .as_ref()
-    .map_err(std::io::Error::raw_os_error)
-    .map_err(Option::unwrap)
-    .map_err(|e| e as u32)
-    .map_err(Win32Error::new)?
-    .write_all(resource)
-    .as_ref()
-    .map_err(std::io::Error::raw_os_error)
-    .map_err(Option::unwrap)
-    .map_err(|e| e as u32)
-    .map_err(Win32Error::new)?;
+  if resource.is_empty() {
+    return ioeresult!(NotFound, "{id:?} is not present in library resources");
+  }
+  std::fs::File::create(dst)?.write_all(resource)?;
   Ok(())
 }
 
@@ -147,11 +138,6 @@ pub fn create_temp_dir() -> std::io::Result<PathBuf> {
     .collect();
   let random_temp_sub_dir_path = temp_path.join(random_hex_string);
   // TODO: std::fs::set_permissions(path, perm)
-  std::fs::create_dir_all(&random_temp_sub_dir_path)
-    .as_ref()
-    .map_err(std::io::Error::raw_os_error)
-    .map_err(Option::unwrap)
-    .map_err(|e| e as u32)
-    .map_err(Win32Error::new)?;
+  std::fs::create_dir_all(&random_temp_sub_dir_path)?;
   Ok(random_temp_sub_dir_path)
 }

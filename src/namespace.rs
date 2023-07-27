@@ -1,7 +1,6 @@
 use std::cell::UnsafeCell;
 
-use cutils::{inspection::GetPtrExt, strings::WideCStr, unsafe_defer, widecstr};
-use get_last_error::Win32Error;
+use cutils::{inspection::GetPtrExt, strings::WideCStr, unsafe_defer, widecstr, errors::get_last_error_code};
 use winapi::{
   shared::{
     minwindef::{BYTE, DWORD, FALSE},
@@ -187,8 +186,8 @@ fn NamespaceRuntimeInit() -> std::io::Result<()> {
     if !unsafe { PrivateNamespace.is_null() } {
       break;
     }
-    let LastError = Win32Error::get_last_error();
-    if LastError.code() != ERROR_ALREADY_EXISTS {
+    let LastError = get_last_error_code();
+    if LastError != ERROR_ALREADY_EXISTS {
       return Err(error!(LastError, "Failed to create private namespace"));
     }
     unsafe {
@@ -197,8 +196,8 @@ fn NamespaceRuntimeInit() -> std::io::Result<()> {
     if !unsafe { PrivateNamespace.is_null() } {
       break;
     }
-    let LastError = Win32Error::get_last_error();
-    if LastError.code() == ERROR_PATH_NOT_FOUND {
+    let LastError = get_last_error_code();
+    if LastError == ERROR_PATH_NOT_FOUND {
       continue;
     }
     return Err(error!(LastError, "Failed to open private namespace"));

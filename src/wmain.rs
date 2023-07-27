@@ -1,8 +1,4 @@
-use cutils::{
-  csizeof, cstr,
-  inspection::{GetPtrExt, InitZeroed},
-  unsafe_defer, widecstr,
-};
+use cutils::{csizeof, cstr, inspection::GetPtrExt, unsafe_defer, widecstr};
 use winapi::{
   shared::{
     minwindef::{BOOL, DWORD, FALSE, TRUE, USHORT},
@@ -105,7 +101,7 @@ fn InitializeSecurityObjects() -> std::io::Result<(SECURITY_ATTRIBUTES, bool)> {
     MaybeLocalSystem: TOKEN_USER,
     LargeEnoughForLocalSystem: [u8; MAX_SID_SIZE],
   }
-  let mut TokenUserBuffer = unsafe { TokenUserStruct::init_zeroed() };
+  let mut TokenUserBuffer: TokenUserStruct = unsafe { std::mem::zeroed() };
   if unsafe {
     CreateWellKnownSid(
       WinLocalSystemSid,

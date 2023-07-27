@@ -4,9 +4,10 @@ use winapi::shared::{
   ntdef::{HRESULT, PCWSTR, PVOID},
 };
 
-#[repr(C)]
+#[allow(dead_code)]
+#[repr(i32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum DEVPROP_OPERATOR {
+pub(crate) enum DEVPROP_OPERATOR {
   MODIFIER_NOT = 65536,
   MODIFIER_IGNORE_CASE = 131072,
   NONE = 0,
@@ -52,14 +53,15 @@ pub enum DEVPROP_OPERATOR {
 }
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct DEVPROP_FILTER_EXPRESSION {
-  pub Operator: DEVPROP_OPERATOR,
-  pub Property: DEVPROPERTY,
+pub(crate) struct DEVPROP_FILTER_EXPRESSION {
+  pub(crate) Operator: DEVPROP_OPERATOR,
+  pub(crate) Property: DEVPROPERTY,
 }
-#[repr(C)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 
-pub enum DEV_OBJECT_TYPE {
+#[allow(dead_code)]
+#[repr(i32)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) enum DEV_OBJECT_TYPE {
   Unknown = 0,
   DeviceInterface = 1,
   DeviceContainer = 2,
@@ -73,9 +75,10 @@ pub enum DEV_OBJECT_TYPE {
   AEPService = 10,
   DevicePanel = 11,
 }
-#[repr(C)]
+#[allow(dead_code)]
+#[repr(i32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum DEV_QUERY_FLAGS {
+pub(crate) enum DEV_QUERY_FLAGS {
   None = 0,
   UpdateResults = 1,
   AllProperties = 2,
@@ -83,59 +86,68 @@ pub enum DEV_QUERY_FLAGS {
   AsyncClose = 8,
 }
 
-#[repr(C)]
+#[allow(dead_code)]
+#[repr(i32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum DEV_QUERY_STATE {
+pub(crate) enum DEV_QUERY_STATE {
   Initialized = 0,
   EnumCompleted = 1,
   Aborted = 2,
   Closed = 3,
 }
-#[repr(C)]
+
+#[allow(dead_code)]
+#[repr(i32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum DEV_QUERY_RESULT_ACTION {
+pub(crate) enum DEV_QUERY_RESULT_ACTION {
   StateChange = 0,
   Add = 1,
   Update = 2,
   Remove = 3,
 }
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct DEV_OBJECT {
-  pub ObjectType: DEV_OBJECT_TYPE,
-  pub pszObjectId: PCWSTR,
-  pub cPropertyCount: ULONG,
-  pub pProperties: *const DEVPROPERTY,
+pub(crate) struct DEV_OBJECT {
+  pub(crate) ObjectType: DEV_OBJECT_TYPE,
+  pub(crate) pszObjectId: PCWSTR,
+  pub(crate) cPropertyCount: ULONG,
+  pub(crate) pProperties: *const DEVPROPERTY,
 }
-pub type PDEV_OBJECT = *mut DEV_OBJECT;
+
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct DEV_QUERY_RESULT_ACTION_DATA {
-  pub Action: DEV_QUERY_RESULT_ACTION,
-  pub Data: _DEV_QUERY_RESULT_ACTION_DATA__DEV_QUERY_RESULT_UPDATE_PAYLOAD,
+pub(crate) struct DEV_QUERY_RESULT_ACTION_DATA {
+  pub(crate) Action: DEV_QUERY_RESULT_ACTION,
+  pub(crate) Data: _DEV_QUERY_RESULT_ACTION_DATA__DEV_QUERY_RESULT_UPDATE_PAYLOAD,
 }
+
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub union _DEV_QUERY_RESULT_ACTION_DATA__DEV_QUERY_RESULT_UPDATE_PAYLOAD {
-  pub State: DEV_QUERY_STATE,
-  pub DeviceObject: DEV_OBJECT,
+pub(crate) union _DEV_QUERY_RESULT_ACTION_DATA__DEV_QUERY_RESULT_UPDATE_PAYLOAD {
+  pub(crate) State: DEV_QUERY_STATE,
+  pub(crate) DeviceObject: DEV_OBJECT,
 }
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct HDEVQUERY__ {
-  pub unused: ::std::os::raw::c_int,
+pub(crate) struct HDEVQUERY__ {
+  pub(crate) unused: ::std::os::raw::c_int,
 }
-pub type HDEVQUERY = *mut HDEVQUERY__;
-pub type PHDEVQUERY = *mut HDEVQUERY;
-pub type PDEV_QUERY_RESULT_CALLBACK = ::std::option::Option<
+
+pub(crate) type HDEVQUERY = *mut HDEVQUERY__;
+pub(crate) type PHDEVQUERY = *mut HDEVQUERY;
+
+pub(crate) type PDEV_QUERY_RESULT_CALLBACK = ::std::option::Option<
   unsafe extern "system" fn(
     hDevQuery: HDEVQUERY,
     pContext: PVOID,
     pActionData: *const DEV_QUERY_RESULT_ACTION_DATA,
   ),
 >;
+
 extern "system" {
-  pub fn DevCreateObjectQuery(
+  pub(crate) fn DevCreateObjectQuery(
     ObjectType: DEV_OBJECT_TYPE,
     QueryFlags: ULONG,
     cRequestedProperties: ULONG,
@@ -148,5 +160,5 @@ extern "system" {
   ) -> HRESULT;
 }
 extern "system" {
-  pub fn DevCloseObjectQuery(hDevQuery: HDEVQUERY);
+  pub(crate) fn DevCloseObjectQuery(hDevQuery: HDEVQUERY);
 }

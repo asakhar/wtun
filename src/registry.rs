@@ -1,9 +1,8 @@
 use cutils::{
   check_handle,
-  inspection::{CastToMutVoidPtrExt, GetPtrExt},
+  inspection::GetPtrExt,
   strings::{WideCStr, WideCString},
 };
-use get_last_error::Win32Error;
 use winapi::{
   shared::{
     minwindef::{BYTE, DWORD, HKEY},
@@ -64,7 +63,7 @@ impl RegKey {
         samDesired,
       )
     };
-    if !check_handle(Key.cast_to_pvoid()) {
+    if !check_handle(Key.cast()) {
       return Err(last_error!("Failed to open device registry key"));
     }
     Ok(Self(Key))
@@ -109,7 +108,10 @@ pub fn RegistryGetString(
   if value.len() & 1 != 0 {
     return Err(std::io::Error::from_raw_os_error(ERROR_INVALID_DATA as i32));
   }
-  let value: Vec<u16> = value.chunks_exact(2).map(|chunk| u16::from_ne_bytes(chunk.try_into().unwrap())).collect();
+  let value: Vec<u16> = value
+    .chunks_exact(2)
+    .map(|chunk| u16::from_ne_bytes(chunk.try_into().unwrap()))
+    .collect();
   let value = WideCString::from(value);
 
   if value_type != RegistryValueType::RegExpandSz {
@@ -173,9 +175,8 @@ pub fn RegistryQueryString(
     }
     _ => {
       let RegPath = LoggerGetRegistryKeyPath(Key);
-      let err = Win32Error::new(ERROR_INVALID_DATATYPE);
       return Err(error!(
-        err,
+        ERROR_INVALID_DATATYPE,
         "Registry value {}\\{} is not a string (type: {})",
         RegPath.as_ref().display(),
         Name.display(),
@@ -237,7 +238,7 @@ pub fn RegistryQueryDWORD(
   if ValueType != REG_DWORD {
     let RegPath = LoggerGetRegistryKeyPath(Key);
     return Err(error!(
-      Win32Error::new(ERROR_INVALID_DATA),
+      ERROR_INVALID_DATA,
       "Value {}\\{} is not a DWORD (type: {})",
       RegPath.as_ref().display(),
       Name.display(),
@@ -247,7 +248,7 @@ pub fn RegistryQueryDWORD(
   if Size != std::mem::size_of::<DWORD>() {
     let RegPath = LoggerGetRegistryKeyPath(Key);
     return Err(error!(
-      Win32Error::new(ERROR_INVALID_DATA),
+      ERROR_INVALID_DATA,
       "Value {}\\{} size is not 4 bytes (size: {})",
       RegPath.as_ref().display(),
       Name.display(),

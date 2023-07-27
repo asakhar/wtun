@@ -2,14 +2,13 @@ use std::ptr::null_mut;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
+use cutils::errors::get_last_error_code;
 use cutils::ignore::ResultIgnoreExt;
-use cutils::inspection::{CastToMutVoidPtrExt, GetPtrExt, InitZeroed};
+use cutils::inspection::GetPtrExt;
 use cutils::strings::{StaticWideCStr, WideCStr, WideCString};
 use cutils::{
-  check_handle, csizeof, defer, guid_eq, static_widecstr, unsafe_defer, widecstr,
-  ErrorFromCrExt,
+  check_handle, csizeof, defer, guid_eq, static_widecstr, unsafe_defer, widecstr, ErrorFromCrExt,
 };
-use get_last_error::Win32Error;
 use winapi::shared::basetsd::INT32;
 use winapi::shared::cfg::DN_HAS_PROBLEM;
 use winapi::shared::devguid::GUID_DEVCLASS_NET;
@@ -79,9 +78,9 @@ use crate::session::{ConstrunctsAndProvidesSession, Session, WintunStartSession}
 use crate::winapi_ext::devquery::{
   DevCloseObjectQuery, DevCreateObjectQuery, DEVPROP_FILTER_EXPRESSION,
   DEVPROP_OPERATOR::{EQUALS, EQUALS_IGNORE_CASE},
-  DEV_QUERY_FLAGS, DEV_QUERY_RESULT_ACTION_DATA, HDEVQUERY,
+  DEV_OBJECT_TYPE, DEV_QUERY_FLAGS, DEV_QUERY_RESULT_ACTION, DEV_QUERY_RESULT_ACTION_DATA,
+  DEV_QUERY_STATE, HDEVQUERY,
 };
-use crate::winapi_ext::devquery::{DEV_OBJECT_TYPE, DEV_QUERY_RESULT_ACTION, DEV_QUERY_STATE};
 use crate::winapi_ext::swdevice::{
   DriverRequired, SilentInstall, SwDeviceClose, SwDeviceCreate, HSWDEVICE, SW_DEVICE_CREATE_INFO,
 };
@@ -122,6 +121,7 @@ pub struct Adapter {
   pub(crate) DevInstanceID: StaticWideCStr<MAX_DEVICE_ID_LEN>,
   pub(crate) LuidIndex: DWORD,
   pub(crate) IfType: DWORD,
+  #[allow(dead_code)]
   pub(crate) IfIndex: DWORD,
 }
 
@@ -755,7 +755,7 @@ pub fn WintunOpenAdapter<T: ConstructsAndProvidesAdapter>(Name: &WideCStr) -> st
   let mut Found = false;
   for EnumIndex in 0.. {
     if FALSE == unsafe { SetupDiEnumDeviceInfo(DevInfo, EnumIndex, &mut DevInfoData) } {
-      if Win32Error::get_last_error().code() == ERROR_NO_MORE_ITEMS {
+      if get_last_error_code() == ERROR_NO_MORE_ITEMS {
         break;
       }
       continue;
@@ -1112,7 +1112,7 @@ pub(crate) fn AdapterRemoveInstance(
       InstallFunction: DIF_REMOVE,
     },
     Scope: DI_REMOVEDEVICE_GLOBAL,
-    ..unsafe { InitZeroed::init_zeroed() }
+    ..unsafe { std::mem::zeroed() }
   };
   let result = unsafe {
     SetupDiSetClassInstallParamsW(
@@ -1131,6 +1131,7 @@ pub(crate) fn AdapterRemoveInstance(
   }
   Ok(())
 }
+
 pub(crate) fn AdapterEnableInstance(
   DevInfo: HDEVINFO,
   DevInfoData: *mut SP_DEVINFO_DATA,
@@ -1146,7 +1147,7 @@ pub(crate) fn AdapterEnableInstance(
     },
     StateChange: DICS_ENABLE,
     Scope: DICS_FLAG_GLOBAL,
-    ..unsafe { InitZeroed::init_zeroed() }
+    ..unsafe { std::mem::zeroed() }
   };
   let result = unsafe {
     SetupDiSetClassInstallParamsW(
@@ -1181,7 +1182,7 @@ pub(crate) fn AdapterDisableInstance(
     },
     StateChange: DICS_DISABLE,
     Scope: DICS_FLAG_GLOBAL,
-    ..unsafe { InitZeroed::init_zeroed() }
+    ..unsafe { std::mem::zeroed() }
   };
   let result = unsafe {
     SetupDiSetClassInstallParamsW(
@@ -1290,7 +1291,7 @@ pub fn AdapterCleanupOrphanedDevices() {
   for EnumIndex in 0.. {
     let result = unsafe { SetupDiEnumDeviceInfo(DevInfo, EnumIndex, DevInfoData.get_mut_ptr()) };
     if result == FALSE {
-      if Win32Error::get_last_error().code() == ERROR_NO_MORE_ITEMS {
+      if get_last_error_code() == ERROR_NO_MORE_ITEMS {
         break;
       }
       continue;
@@ -1342,6 +1343,7 @@ pub fn AdapterCleanupOrphanedDevices() {
   DeviceInstallationMutex.release();
 }
 
+#[allow(dead_code)]
 fn RenameByNetGUID(Guid: GUID, Name: &WideCStr) -> std::io::Result<()> {
   let DevInfo = unsafe {
     SetupDiGetClassDevsExW(
@@ -1362,12 +1364,12 @@ fn RenameByNetGUID(Guid: GUID, Name: &WideCStr) -> std::io::Result<()> {
   };
   let mut DevInfoData = SP_DEVINFO_DATA {
     cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as DWORD,
-    ..unsafe { InitZeroed::init_zeroed() }
+    ..unsafe { std::mem::zeroed() }
   };
   for EnumIndex in 0.. {
     let result = unsafe { SetupDiEnumDeviceInfo(DevInfo, EnumIndex, DevInfoData.get_mut_ptr()) };
     if result == FALSE {
-      if Win32Error::get_last_error().code() == ERROR_NO_MORE_ITEMS {
+      if get_last_error_code() == ERROR_NO_MORE_ITEMS {
         break;
       }
       continue;
@@ -1382,12 +1384,12 @@ fn RenameByNetGUID(Guid: GUID, Name: &WideCStr) -> std::io::Result<()> {
         KEY_QUERY_VALUE,
       )
     };
-    if Key.cast_to_pvoid() == INVALID_HANDLE_VALUE {
+    if !check_handle(Key.cast()) {
       continue;
     }
     let Key = RegKey::from_raw(Key);
     let Ok(ValueStr) = RegistryQueryString(&Key, widecstr!("NetCfgInstanceid"), true) else {continue;};
-    let mut Guid2 = unsafe { GUID::init_zeroed() };
+    let mut Guid2: GUID = unsafe { std::mem::zeroed() };
     let HRet = unsafe { CLSIDFromString(ValueStr.as_ptr(), Guid2.get_mut_ptr()) };
     if FAILED(HRet) || guid_eq(Guid, Guid2) {
       continue;
@@ -1411,26 +1413,27 @@ fn RenameByNetGUID(Guid: GUID, Name: &WideCStr) -> std::io::Result<()> {
   }
   destroyDevInfoList.run();
   Err(error!(
-    Win32Error::new(ERROR_NOT_FOUND),
+    ERROR_NOT_FOUND,
     "Failed to get device by GUID: {:?}", Guid
   ))
 }
 
+#[allow(dead_code)]
 pub fn ConvertInterfaceAliasToGuid(Name: &WideCStr) -> std::io::Result<GUID> {
-  let mut Luid = unsafe { NET_LUID::init_zeroed() };
+  let mut Luid: NET_LUID = unsafe { std::mem::zeroed() };
   let result = unsafe { ConvertInterfaceAliasToLuid(Name.as_ptr(), Luid.get_mut_ptr()) };
   if result != NO_ERROR {
     return Err(error!(
-      Win32Error::new(result),
+      result,
       "Failed convert interface {} name to the locally unique identifier",
       Name.display()
     ));
   }
-  let mut Guid = unsafe { GUID::init_zeroed() };
+  let mut Guid: GUID = unsafe { std::mem::zeroed() };
   let result = unsafe { ConvertInterfaceLuidToGuid(Luid.get_const_ptr(), Guid.get_mut_ptr()) };
   if result != NO_ERROR {
     return Err(error!(
-      Win32Error::new(result),
+      result,
       "Failed to convert interface {} LUID ({}) to GUID",
       Name.display(),
       Luid.Value

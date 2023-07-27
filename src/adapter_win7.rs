@@ -1,12 +1,12 @@
 use cutils::{
   check_handle, csizeof,
+  errors::get_last_error_code,
   files::WindowsFile,
-  inspection::{GetPtrExt, InitZeroed},
+  inspection::GetPtrExt,
   static_widecstr,
   strings::{StaticWideCStr, WideCStr},
   unsafe_defer, wide_array, widecstr,
 };
-use get_last_error::Win32Error;
 use winapi::{
   shared::{
     cfg::DN_HAS_PROBLEM,
@@ -50,13 +50,13 @@ use crate::{
     Adapter, AdapterGetDeviceObjectFileName, AdapterRemoveInstance, DEVPKEY_Wintun_Name,
     WINTUN_ENUMERATOR, WINTUN_HWID,
   },
-  logger::{error, last_error, IntoError, info},
+  logger::{error, info, last_error, IntoError},
   registry::RegKey,
   rundll32::*,
   wmain::{get_system_params, IMAGE_FILE_PROCESS},
 };
 
-const DEVPKEY_Wintun_OwningProcess: DEVPROPKEY = DEVPROPKEY {
+const DEVPKEY_WINTUN_OWNING_PROCESS: DEVPROPKEY = DEVPROPKEY {
   fmtid: winapi::shared::guiddef::GUID {
     Data1: 0x3361c968,
     Data2: 0x2f2e,
@@ -67,7 +67,7 @@ const DEVPKEY_Wintun_OwningProcess: DEVPROPKEY = DEVPROPKEY {
 };
 
 #[repr(C)]
-pub struct OWNING_PROCESS {
+pub struct OwningProcess {
   ProcessId: DWORD,
   CreationTime: FILETIME,
 }
@@ -187,7 +187,13 @@ pub fn create_adapter_win7(
     }
     cleanupDevInfo.forget();
   }
-  if cfg!(not(any(target_arch = "x86", target_arch = "arm", target_arch = "x86_64"))) || native_machine != IMAGE_FILE_PROCESS {
+  if cfg!(not(any(
+    target_arch = "x86",
+    target_arch = "arm",
+    target_arch = "x86_64"
+  )))
+    || native_machine != IMAGE_FILE_PROCESS
+  {
     init_instance_not_wow64(dev_info, tunnel_type, dev_info_data_ptr)?;
   }
   unsafe_defer! { cleanupDevInfo <-
@@ -200,7 +206,7 @@ pub fn create_adapter_win7(
     drop(AdapterRemoveInstance(dev_info, dev_info_data_ptr));
   };
   let mut OwningProcess = unsafe {
-    OWNING_PROCESS {
+    OwningProcess {
       ProcessId: GetCurrentProcessId(),
       ..std::mem::zeroed()
     }
@@ -257,7 +263,7 @@ pub fn create_adapter_win7(
         SetupDiSetDevicePropertyW(
           dev_info,
           dev_info_data_ptr,
-          DEVPKEY_Wintun_OwningProcess.get_const_ptr(),
+          DEVPKEY_WINTUN_OWNING_PROCESS.get_const_ptr(),
           DEVPROP_TYPE_BINARY,
           OwningProcess.get_const_ptr().cast(),
           csizeof!(=OwningProcess),
@@ -453,7 +459,7 @@ pub fn create_adapter_post_win7(adapter: &mut Adapter, tunnel_type: &WideCStr) {
   };
 }
 
-pub fn process_is_stale(owning_process: &mut OWNING_PROCESS) -> bool {
+pub fn process_is_stale(owning_process: &mut OwningProcess) -> bool {
   let Process = unsafe {
     OpenProcess(
       PROCESS_QUERY_LIMITED_INFORMATION,
@@ -499,7 +505,7 @@ pub fn cleanup_orphaned_devices_win7() {
     )
   };
   if !check_handle(DevInfo) {
-    if Win32Error::get_last_error().code() != ERROR_INVALID_DATA {
+    if get_last_error_code() != ERROR_INVALID_DATA {
       last_error!("Failed to get adapters");
     }
     return;
@@ -511,20 +517,20 @@ pub fn cleanup_orphaned_devices_win7() {
   };
   for EnumIndex in 0.. {
     if FALSE == unsafe { SetupDiEnumDeviceInfo(DevInfo, EnumIndex, DevInfoData.get_mut_ptr()) } {
-      if Win32Error::get_last_error().code() == ERROR_NO_MORE_ITEMS {
+      if get_last_error_code() == ERROR_NO_MORE_ITEMS {
         break;
       }
       continue;
     }
 
-    let mut OwningProcess = unsafe { OWNING_PROCESS::init_zeroed() };
+    let mut OwningProcess: OwningProcess = unsafe { std::mem::zeroed() };
     let mut PropType: DEVPROPTYPE = 0;
     if TRUE
       == unsafe {
         SetupDiGetDevicePropertyW(
           DevInfo,
           DevInfoData.get_mut_ptr(),
-          DEVPKEY_Wintun_OwningProcess.get_const_ptr(),
+          DEVPKEY_WINTUN_OWNING_PROCESS.get_const_ptr(),
           PropType.get_mut_ptr(),
           OwningProcess.get_mut_ptr().cast(),
           csizeof!(=OwningProcess),
@@ -585,7 +591,7 @@ pub fn cleanup_lagacy_devices() {
   };
   for EnumIndex in 0.. {
     if FALSE == unsafe { SetupDiEnumDeviceInfo(dev_info, EnumIndex, dev_info_data.get_mut_ptr()) } {
-      if Win32Error::get_last_error().code() == ERROR_NO_MORE_ITEMS {
+      if get_last_error_code() == ERROR_NO_MORE_ITEMS {
         break;
       }
       continue;
