@@ -643,7 +643,7 @@ pub fn wintun_delete_driver() -> std::io::Result<()> {
     let mut size = csizeof!(=large_buffer);
     let drv_into_detail_data_ptr = large_buffer.as_mut_ptr() as *mut SP_DRVINFO_DETAIL_DATA_W;
     let drv_info_detail_data = unsafe { &mut *drv_into_detail_data_ptr };
-    drv_info_detail_data.cbSize = std::mem::size_of::<SP_DRVINFO_DETAIL_DATA_W>() as DWORD;
+    drv_info_detail_data.cbSize = csizeof!(SP_DRVINFO_DETAIL_DATA_W);
     let result = unsafe {
       SetupDiGetDriverInfoDetailW(
         dev_info,
