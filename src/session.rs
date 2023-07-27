@@ -75,7 +75,6 @@ const __CHECK_ATOMIC_U32: () = {
   assert!(csizeof!(ULONG; usize) == csizeof!(std::sync::atomic::AtomicU32));
 };
 
-// #[cfg(target_has_atomic_load_store = "32")]
 #[repr(C)]
 struct TunRing {
   head: std::sync::atomic::AtomicU32,
