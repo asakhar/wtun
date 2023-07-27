@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-  adapter::AdapterOpenDeviceObject,
+  adapter::adapter_open_device_object,
   logger::{error, last_error},
   wmain::get_system_params,
   Adapter, PacketSize, MAX_IP_PACKET_SIZE,
@@ -185,7 +185,7 @@ impl TunRegisterRings {
         ring_size_usize * 2
       ));
     }
-    unsafe_defer! { cleanupRegion <-
+    unsafe_defer! { cleanup_region <-
       VirtualFree(region.cast(), 0, MEM_RELEASE);
     };
     let ring_size = ring_size_usize as ULONG;
@@ -203,7 +203,7 @@ impl TunRegisterRings {
       ring: unsafe { region.add(ring_size_usize) }.cast(),
       tail_moved,
     };
-    cleanupRegion.forget();
+    cleanup_region.forget();
     Ok(Self { send, recv })
   }
 }
@@ -278,7 +278,7 @@ impl Drop for ObjectHandle {
 
 impl ObjectHandle {
   fn open(adapter: &mut Adapter) -> std::io::Result<Self> {
-    AdapterOpenDeviceObject(adapter)
+    adapter_open_device_object(adapter)
       .map(ObjectHandle)
       .map_err(|err| error!(err, "Failed to open adapter device object"))
   }
@@ -309,9 +309,15 @@ pub struct Session {
   capacity: ULONG,
   recv: SessionRecv,
   send: SessionSend,
-  descriptor: TunRegisterRings,
+  descriptor: UnsafeCell<TunRegisterRings>,
   handle: ObjectHandle,
   recv_tail_moved: Event,
+}
+
+impl Session {
+  unsafe fn descriptor(&self) -> &mut TunRegisterRings {
+    &mut *self.descriptor.get()
+  } 
 }
 
 unsafe impl Send for Session {}
@@ -336,7 +342,7 @@ impl Session {
     let recv = SessionRecv::default();
     let send = SessionSend::default();
     let session = T::construct(Self {
-      descriptor,
+      descriptor: UnsafeCell::new(descriptor),
       handle,
       capacity,
       recv,
@@ -356,38 +362,34 @@ impl Session {
   }
 }
 
-pub(crate) fn WintunStartSession<T: ConstrunctsAndProvidesSession>(
+pub(crate) fn wintun_start_session<T: ConstrunctsAndProvidesSession>(
   adapter: &mut Adapter,
   capacity: DWORD,
 ) -> std::io::Result<T> {
   let system_params = unsafe { get_system_params() };
   let ring_size = tun_ring_size(capacity);
-  let descriptor = TunRegisterRings::new(&mut system_params.SecurityAttributes, ring_size)?;
-  let recv_tail_moved = Event::new_ex(&mut system_params.SecurityAttributes, false, true)
+  let descriptor = TunRegisterRings::new(&mut system_params.security_attributes, ring_size)?;
+  let recv_tail_moved = Event::new_ex(&mut system_params.security_attributes, false, true)
     .map_err(|err| error!(err, "Failed to create dup recv event"))?;
   let handle = ObjectHandle::open(adapter)?;
   let session: T = Session::new_wrapped(recv_tail_moved, descriptor, handle, capacity);
-  let session_ptr: *const Session = &*session;
-  let session_ptr: *const UnsafeCell<Session> = session_ptr.cast();
-  let session_mut: &mut Session = unsafe { &mut *(*session_ptr).get() };
-  let mut BytesReturned: DWORD = 0;
+  let mut bytes_returned: DWORD = 0;
   if FALSE
     == unsafe {
       DeviceIoControl(
         session.handle.0,
         TUN_IOCTL_REGISTER_RINGS,
-        session_mut.descriptor.get_mut_ptr().cast(),
+        session.descriptor().get_mut_ptr().cast(),
         csizeof!(TunRegisterRings),
         null_mut(),
         0,
-        &mut BytesReturned,
+        &mut bytes_returned,
         null_mut(),
       )
     }
   {
     return Err(last_error!("Failed to register rings"));
   }
-  // drop(session_mut);
   Ok(session)
 }
 
@@ -399,7 +401,7 @@ impl Session {
     tun_ring_size(self.capacity)
   }
   pub fn is_write_avaliable(&self) -> std::io::Result<bool> {
-    let read_event = self.GetWriteWaitEvent();
+    let read_event = self.get_write_wait_event();
     let res = unsafe { WaitForSingleObject(read_event.0, 0) };
     match res {
       WAIT_OBJECT_0 => Ok(true),
@@ -412,7 +414,7 @@ impl Session {
     }
   }
   pub fn is_read_avaliable(&self) -> std::io::Result<bool> {
-    let write_event = self.GetReadWaitEvent();
+    let write_event = self.get_read_wait_event();
     let res = unsafe { WaitForSingleObject(write_event.0, 0) };
     match res {
       WAIT_OBJECT_0 => Ok(true),
@@ -428,7 +430,7 @@ impl Session {
     &self,
     timeout: Option<std::time::Duration>,
   ) -> std::io::Result<()> {
-    let read_event = self.GetReadWaitEvent();
+    let read_event = self.get_read_wait_event();
     let millis = timeout
       .as_ref()
       .map(std::time::Duration::as_millis)
@@ -456,7 +458,7 @@ impl Session {
     &self,
     timeout: Option<std::time::Duration>,
   ) -> std::io::Result<()> {
-    let write_event = self.GetWriteWaitEvent();
+    let write_event = self.get_write_wait_event();
     let millis = timeout
       .as_ref()
       .map(std::time::Duration::as_millis)
@@ -480,10 +482,10 @@ impl Session {
       )),
     }
   }
-  pub fn GetReadWaitEvent(&self) -> &Event {
-    &self.descriptor.send.tail_moved
+  pub fn get_read_wait_event(&self) -> &Event {
+    unsafe { &self.descriptor().send.tail_moved }
   }
-  pub fn GetWriteWaitEvent(&self) -> &Event {
+  pub fn get_write_wait_event(&self) -> &Event {
     &self.recv_tail_moved
   }
 }
@@ -551,7 +553,7 @@ impl Session {
     if unsafe { *self.send.head.get() } >= self.capacity {
       return Err(IoError::AdapterIsTerminating);
     }
-    let buff_tail = self.descriptor.send.ring().tail.load(Ordering::Acquire);
+    let buff_tail = unsafe { self.descriptor().send.ring().tail.load(Ordering::Acquire) };
     if buff_tail >= self.capacity {
       return Err(IoError::AdapterIsTerminating);
     }
@@ -567,7 +569,7 @@ impl Session {
     }
     let buff_packet = unsafe {
       self
-        .descriptor
+        .descriptor()
         .send
         .ring_mut()
         .get_mut(*self.send.head.get())
@@ -609,7 +611,7 @@ impl<'a> Drop for RecvPacket<'a> {
     while unsafe { *session.send.packets_to_release.get() } != 0 {
       let buff_packet = unsafe {
         session
-          .descriptor
+          .descriptor()
           .send
           .ring()
           .get(*session.send.head_release.get())
@@ -627,10 +629,10 @@ impl<'a> Drop for RecvPacket<'a> {
       };
       unsafe { *session.send.packets_to_release.get() -= 1 };
     }
-    session.descriptor.send.ring().head.store(
+    unsafe { session.descriptor().send.ring().head.store(
       unsafe { *session.send.head_release.get() },
       Ordering::Release,
-    );
+    ) };
     guard.leave();
   }
 }
@@ -684,7 +686,7 @@ impl Session {
       return Err(IoError::AdapterIsTerminating);
     }
     let aligned_packet_size = tun_align(TUN_PACKET_SIZE.wrapping_add(packet_size));
-    let buff_head = self.descriptor.recv.ring().head.load(Ordering::Acquire);
+    let buff_head = unsafe { self.descriptor().recv.ring().head.load(Ordering::Acquire) };
     if buff_head >= self.capacity {
       return Err(IoError::AdapterIsTerminating);
     }
@@ -699,7 +701,7 @@ impl Session {
     }
     let buff_packet = unsafe {
       self
-        .descriptor
+        .descriptor()
         .recv
         .ring_mut()
         .get_mut(*self.recv.tail.get())
@@ -735,7 +737,7 @@ impl<'a> Drop for SendPacket<'a> {
     while unsafe { *session.recv.packets_to_release.get() } != 0 {
       let buff_packet = unsafe {
         session
-          .descriptor
+          .descriptor()
           .recv
           .ring()
           .get(*session.recv.tail_release.get())
@@ -752,23 +754,23 @@ impl<'a> Drop for SendPacket<'a> {
       };
       unsafe { *session.recv.packets_to_release.get() -= 1 };
     }
-    if session.descriptor.recv.ring().tail.load(Ordering::Relaxed)
+    if unsafe { session.descriptor().recv.ring().tail.load(Ordering::Relaxed) }
       != unsafe { *session.recv.tail_release.get() }
     {
-      session.descriptor.recv.ring().tail.store(
+      unsafe { session.descriptor().recv.ring().tail.store(
         unsafe { *session.recv.tail_release.get() },
         Ordering::Release,
-      );
+      ) };
       unsafe { SetEvent(session.recv_tail_moved.0) };
-      if session
-        .descriptor
+      if unsafe { session
+        .descriptor()
         .recv
         .ring()
         .alertable
-        .load(Ordering::Acquire)
+        .load(Ordering::Acquire) }
         != 0
       {
-        unsafe { SetEvent(session.descriptor.recv.tail_moved.0) };
+        unsafe { SetEvent(session.descriptor().recv.tail_moved.0) };
       }
     }
     guard.leave();

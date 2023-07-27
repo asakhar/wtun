@@ -1,7 +1,7 @@
 use cutils::{
   check_handle,
   inspection::GetPtrExt,
-  strings::{WideCStr, WideCString},
+  strings::{WideCStr, WideCString}, csizeof,
 };
 use winapi::{
   shared::{
@@ -17,7 +17,7 @@ use winapi::{
   },
 };
 
-use crate::logger::{error, last_error, LoggerGetRegistryKeyPath};
+use crate::logger::{error, last_error, logger_get_registry_key_path};
 
 /* Maximum registry path length
 https://support.microsoft.com/en-us/help/256986/windows-registry-information-for-advanced-users */
@@ -46,27 +46,27 @@ pub struct RegKey(HKEY);
 
 impl RegKey {
   pub fn open(
-    DeviceInfoSet: HDEVINFO,
-    DeviceInfoData: PSP_DEVINFO_DATA,
-    Scope: DWORD,
-    HwProfile: DWORD,
-    KeyType: DWORD,
-    samDesired: REGSAM,
+    device_info_set: HDEVINFO,
+    device_info_data: PSP_DEVINFO_DATA,
+    scope: DWORD,
+    hw_profile: DWORD,
+    key_type: DWORD,
+    sam_desired: REGSAM,
   ) -> std::io::Result<Self> {
-    let Key: HKEY = unsafe {
+    let key: HKEY = unsafe {
       SetupDiOpenDevRegKey(
-        DeviceInfoSet,
-        DeviceInfoData,
-        Scope,
-        HwProfile,
-        KeyType,
-        samDesired,
+        device_info_set,
+        device_info_data,
+        scope,
+        hw_profile,
+        key_type,
+        sam_desired,
       )
     };
-    if !check_handle(Key.cast()) {
+    if !check_handle(key.cast()) {
       return Err(last_error!("Failed to open device registry key"));
     }
-    Ok(Self(Key))
+    Ok(Self(key))
   }
   pub fn from_raw(key: HKEY) -> Self {
     Self(key)
@@ -101,7 +101,7 @@ impl Drop for RegKey {
  * @return If the function succeeds, the return value is nonzero. If the function fails, the return value is zero. To
  *         get extended error information, call GetLastError.
  */
-pub fn RegistryGetString(
+pub fn registry_get_string(
   value: Box<[u8]>,
   value_type: RegistryValueType,
 ) -> std::io::Result<WideCString> {
@@ -122,18 +122,18 @@ pub fn RegistryGetString(
   }
   let mut expanded = value.clone();
   loop {
-    let Result = unsafe {
+    let result = unsafe {
       ExpandEnvironmentStringsW(value.as_ptr(), expanded.as_mut_ptr(), expanded.capacity())
     };
-    if Result == 0 {
+    if result == 0 {
       let printable = value.display();
       return Err(last_error!(
         "Failed to expand environment variables: {}",
         printable
       ));
     }
-    if Result > value.len_dword() {
-      let amount = Result - value.len_dword();
+    if result > value.len_dword() {
+      let amount = result - value.len_dword();
       expanded.reserve(amount);
       continue;
     }
@@ -160,27 +160,27 @@ pub fn RegistryGetString(
  * @return String with registry value on success; If the function fails, the return value is zero. To get extended error
  *         information, call GetLastError.
  */
-pub fn RegistryQueryString(
-  Key: &RegKey,
-  Name: impl AsRef<WideCStr>,
-  Log: bool,
+pub fn registry_query_string(
+  key: &RegKey,
+  name: impl AsRef<WideCStr>,
+  log: bool,
 ) -> std::io::Result<WideCString> {
-  let Name = Name.as_ref();
-  let mut ValueType = 0;
-  let Size = std::mem::size_of::<WCHAR>() as DWORD * 256;
-  let value = RegistryQuery(Key, Name, &mut ValueType, Size, Log)?;
-  match ValueType {
+  let name = name.as_ref();
+  let mut value_type = 0;
+  let size = csizeof!(WCHAR; DWORD) * 256;
+  let value = registry_query(key, name, &mut value_type, size, log)?;
+  match value_type {
     REG_SZ | REG_EXPAND_SZ | REG_MULTI_SZ => {
-      return RegistryGetString(value, ValueType.try_into().unwrap());
+      return registry_get_string(value, value_type.try_into().unwrap());
     }
     _ => {
-      let RegPath = LoggerGetRegistryKeyPath(Key);
+      let reg_path = logger_get_registry_key_path(key);
       return Err(error!(
         ERROR_INVALID_DATATYPE,
         "Registry value {}\\{} is not a string (type: {})",
-        RegPath.as_ref().display(),
-        Name.display(),
-        ValueType
+        reg_path.as_ref().display(),
+        name.display(),
+        value_type
       ));
     }
   }
@@ -202,100 +202,100 @@ pub fn RegistryQueryString(
  * @return If the function succeeds, the return value is nonzero. If the function fails, the return value is zero. To
  *         get extended error information, call GetLastError.
  */
-pub fn RegistryQueryDWORD(
-  Key: &RegKey,
-  Name: impl AsRef<WideCStr>,
-  Log: bool,
+pub fn registry_query_dword(
+  key: &RegKey,
+  name: impl AsRef<WideCStr>,
+  log: bool,
 ) -> std::io::Result<DWORD> {
-  let mut ValueType = REG_DWORD;
-  let mut Size = std::mem::size_of::<DWORD>();
-  let mut Value: DWORD = 0;
-  let Name = Name.as_ref();
-  let NamePtr = Name.as_ptr();
-  let LastError = unsafe {
+  let mut value_type = REG_DWORD;
+  let mut size = std::mem::size_of::<DWORD>();
+  let mut value: DWORD = 0;
+  let name = name.as_ref();
+  let name_ptr = name.as_ptr();
+  let last_error = unsafe {
     RegQueryValueExW(
-      Key.as_raw(),
-      NamePtr,
+      key.as_raw(),
+      name_ptr,
       std::ptr::null_mut(),
-      ValueType.get_mut_ptr(),
-      Value.get_mut_ptr() as *mut _,
-      Size.get_mut_ptr() as *mut _,
+      value_type.get_mut_ptr(),
+      value.get_mut_ptr() as *mut _,
+      size.get_mut_ptr() as *mut _,
     )
   };
-  if LastError != ERROR_SUCCESS as i32 {
-    let err = std::io::Error::from_raw_os_error(LastError);
-    if Log {
-      let RegPath = LoggerGetRegistryKeyPath(Key);
+  if last_error != ERROR_SUCCESS as i32 {
+    let err = std::io::Error::from_raw_os_error(last_error);
+    if log {
+      let reg_path = logger_get_registry_key_path(key);
       return Err(error!(
         err,
         "Failed to query registry value {}\\{}",
-        RegPath.as_ref().display(),
-        Name.display()
+        reg_path.as_ref().display(),
+        name.display()
       ));
     }
     return Err(err);
   }
-  if ValueType != REG_DWORD {
-    let RegPath = LoggerGetRegistryKeyPath(Key);
+  if value_type != REG_DWORD {
+    let reg_path = logger_get_registry_key_path(key);
     return Err(error!(
       ERROR_INVALID_DATA,
       "Value {}\\{} is not a DWORD (type: {})",
-      RegPath.as_ref().display(),
-      Name.display(),
-      ValueType
+      reg_path.as_ref().display(),
+      name.display(),
+      value_type
     ));
   }
-  if Size != std::mem::size_of::<DWORD>() {
-    let RegPath = LoggerGetRegistryKeyPath(Key);
+  if size != csizeof!(DWORD) {
+    let reg_path = logger_get_registry_key_path(key);
     return Err(error!(
       ERROR_INVALID_DATA,
       "Value {}\\{} size is not 4 bytes (size: {})",
-      RegPath.as_ref().display(),
-      Name.display(),
-      Size
+      reg_path.as_ref().display(),
+      name.display(),
+      size
     ));
   }
-  Ok(Value)
+  Ok(value)
 }
 
-fn RegistryQuery(
-  Key: &RegKey,
-  Name: &WideCStr,
-  ValueType: &mut DWORD,
-  mut BufLen: DWORD,
-  Log: bool,
+fn registry_query(
+  key: &RegKey,
+  name: &WideCStr,
+  value_type: &mut DWORD,
+  mut buf_len: DWORD,
+  log: bool,
 ) -> std::io::Result<Box<[u8]>> {
-  let NamePtr = Name.as_ptr();
-  let mut p = vec![0 as BYTE; BufLen as usize];
+  let name_ptr = name.as_ptr();
+  let mut p = vec![0 as BYTE; buf_len as usize];
   loop {
-    let OldBufLen = BufLen;
-    let LastError = unsafe {
+    let old_buf_len = buf_len;
+    let last_error = unsafe {
       RegQueryValueExW(
-        Key.0,
-        NamePtr,
+        key.0,
+        name_ptr,
         std::ptr::null_mut(),
-        ValueType.get_mut_ptr(),
+        value_type.get_mut_ptr(),
         p.as_mut_ptr(),
-        BufLen.get_mut_ptr(),
+        buf_len.get_mut_ptr(),
       )
     };
-    if LastError == ERROR_SUCCESS as i32 {
-      p.resize(BufLen as usize, 0);
+    if last_error == ERROR_SUCCESS as i32 {
+      p.resize(buf_len as usize, 0);
       return Ok(p.into_boxed_slice());
     }
-    if LastError as u32 != ERROR_MORE_DATA {
-      let err = std::io::Error::from_raw_os_error(LastError);
-      if Log {
-        let RegPath = LoggerGetRegistryKeyPath(Key);
+    if last_error as u32 != ERROR_MORE_DATA {
+      let err = std::io::Error::from_raw_os_error(last_error);
+      if log {
+        let reg_path = logger_get_registry_key_path(key);
         return Err(error!(
           err,
           "Failed to query registry value {}\\{}",
-          RegPath.as_ref().display(),
-          Name.display()
+          reg_path.as_ref().display(),
+          name.display()
         ));
       }
       return Err(err);
     }
-    p.extend(std::iter::repeat(' ' as u8).take((BufLen - OldBufLen) as usize));
+    p.extend(std::iter::repeat(' ' as u8).take((buf_len - old_buf_len) as usize));
   }
 }

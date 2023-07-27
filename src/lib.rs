@@ -23,8 +23,8 @@ mod wintun_inf;
 mod wmain;
 
 pub use adapter::{Adapter, ConstructsAndProvidesAdapter};
-pub use driver::{get_running_driver_version, WintunDeleteDriver as delete_driver};
-pub use namespace::NamespaceDone as deinit_namespace;
+pub use driver::{get_running_driver_version, wintun_delete_driver as delete_driver};
+pub use namespace::namespace_done as deinit_namespace;
 pub use session::{
   Event, IoError, RecvPacket, RecvPacketRead, SendPacket, SendPacketWrite, Session,
 };

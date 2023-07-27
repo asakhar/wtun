@@ -47,7 +47,7 @@ use winapi::{
 
 use crate::{
   adapter::{
-    Adapter, AdapterGetDeviceObjectFileName, AdapterRemoveInstance, DEVPKEY_Wintun_Name,
+    Adapter, adapter_get_device_object_file_name, adapter_remove_instance, DEVPKEY_WINTUN_NAME,
     WINTUN_ENUMERATOR, WINTUN_HWID,
   },
   logger::{error, info, last_error, IntoError},
@@ -68,8 +68,8 @@ const DEVPKEY_WINTUN_OWNING_PROCESS: DEVPROPKEY = DEVPROPKEY {
 
 #[repr(C)]
 pub struct OwningProcess {
-  ProcessId: DWORD,
-  CreationTime: FILETIME,
+  process_id: DWORD,
+  creation_time: FILETIME,
 }
 
 pub fn wait_for_interface_win7(
@@ -101,7 +101,7 @@ pub fn wait_for_interface_win7(
       .ok();
     }
     if file_name.is_none() {
-      file_name = AdapterGetDeviceObjectFileName(dev_instance_id).ok();
+      file_name = adapter_get_device_object_file_name(dev_instance_id).ok();
     }
     if let Some(file_name) = file_name.as_ref() {
       if file.is_none() {
@@ -165,18 +165,18 @@ pub fn create_adapter_win7(
     ..unsafe { std::mem::zeroed() }
   };
   let dev_info_data_ptr = dev_info_data.get_mut_ptr();
-  let native_machine = unsafe { get_system_params().NativeMachine };
+  let native_machine = unsafe { get_system_params().native_machine };
   #[cfg(any(target_arch = "x86", target_arch = "arm", target_arch = "x86_64"))]
   if native_machine != IMAGE_FILE_PROCESS {
-    adapter.DevInstanceID =
+    adapter.dev_instance_id =
       create_instance().map_err(|err| error!(err, "Failed to create device instance"))?;
-    unsafe_defer! { cleanupDevInfo <-
+    unsafe_defer! { cleanup_dev_info <-
       SetupDiDestroyDeviceInfoList(dev_info);
     }
     if unsafe {
       SetupDiOpenDeviceInfoW(
         dev_info,
-        adapter.DevInstanceID.as_ptr(),
+        adapter.dev_instance_id.as_ptr(),
         std::ptr::null_mut(),
         DIOD_INHERIT_CLASSDRVS,
         dev_info_data_ptr,
@@ -185,7 +185,7 @@ pub fn create_adapter_win7(
     {
       return Err(last_error!("Failed to open device info"));
     }
-    cleanupDevInfo.forget();
+    cleanup_dev_info.forget();
   }
   if cfg!(not(any(
     target_arch = "x86",
@@ -196,30 +196,30 @@ pub fn create_adapter_win7(
   {
     init_instance_not_wow64(dev_info, tunnel_type, dev_info_data_ptr)?;
   }
-  unsafe_defer! { cleanupDevInfo <-
+  unsafe_defer! { cleanup_dev_info <-
     SetupDiDestroyDeviceInfoList(dev_info);
   }
-  unsafe_defer! { cleanupDriverInfo <-
+  unsafe_defer! { cleanup_driver_info <-
     SetupDiDestroyDriverInfoList(dev_info, dev_info_data_ptr, SPDIT_COMPATDRIVER);
   };
-  unsafe_defer! { cleanupDevice <- move
-    drop(AdapterRemoveInstance(dev_info, dev_info_data_ptr));
+  unsafe_defer! { cleanup_device <- move
+    drop(adapter_remove_instance(dev_info, dev_info_data_ptr));
   };
-  let mut OwningProcess = unsafe {
+  let mut owning_process = unsafe {
     OwningProcess {
-      ProcessId: GetCurrentProcessId(),
+      process_id: GetCurrentProcessId(),
       ..std::mem::zeroed()
     }
   };
-  let mut Unused: FILETIME = unsafe { std::mem::zeroed() };
+  let mut unused: FILETIME = unsafe { std::mem::zeroed() };
   if FALSE
     == unsafe {
       GetProcessTimes(
         GetCurrentProcess(),
-        OwningProcess.CreationTime.get_mut_ptr(),
-        Unused.get_mut_ptr(),
-        Unused.get_mut_ptr(),
-        Unused.get_mut_ptr(),
+        owning_process.creation_time.get_mut_ptr(),
+        unused.get_mut_ptr(),
+        unused.get_mut_ptr(),
+        unused.get_mut_ptr(),
       )
     }
   {
@@ -251,7 +251,7 @@ pub fn create_adapter_win7(
         SetupDiSetDevicePropertyW(
           dev_info,
           dev_info_data_ptr,
-          DEVPKEY_Wintun_Name.get_const_ptr(),
+          DEVPKEY_WINTUN_NAME.get_const_ptr(),
           DEVPROP_TYPE_STRING,
           name.as_ptr().cast(),
           name.sizeof(),
@@ -265,8 +265,8 @@ pub fn create_adapter_win7(
           dev_info_data_ptr,
           DEVPKEY_WINTUN_OWNING_PROCESS.get_const_ptr(),
           DEVPROP_TYPE_BINARY,
-          OwningProcess.get_const_ptr().cast(),
-          csizeof!(=OwningProcess),
+          owning_process.get_const_ptr().cast(),
+          csizeof!(=owning_process),
           0,
         )
       }
@@ -274,50 +274,50 @@ pub fn create_adapter_win7(
     return Err(last_error!("Failed to set device properties"));
   }
 
-  let mut RequiredChars: DWORD = adapter.DevInstanceID.capacity();
+  let mut required_chars: DWORD = adapter.dev_instance_id.capacity();
   if FALSE
     == unsafe {
       SetupDiGetDeviceInstanceIdW(
         dev_info,
         dev_info_data_ptr,
-        adapter.DevInstanceID.as_mut_ptr(),
-        RequiredChars,
-        RequiredChars.get_mut_ptr(),
+        adapter.dev_instance_id.as_mut_ptr(),
+        required_chars,
+        required_chars.get_mut_ptr(),
       )
     }
   {
     return Err(last_error!("Failed to get adapter instance ID"));
   }
 
-  if wait_for_interface_win7(dev_info, &mut dev_info_data, &adapter.DevInstanceID).is_err() {
-    let mut PropertyType: DEVPROPTYPE = 0;
-    let mut ProblemCode: i32 = 0;
+  if wait_for_interface_win7(dev_info, &mut dev_info_data, &adapter.dev_instance_id).is_err() {
+    let mut property_type: DEVPROPTYPE = 0;
+    let mut problem_code: i32 = 0;
     if FALSE
       == unsafe {
         SetupDiGetDevicePropertyW(
           dev_info,
           dev_info_data_ptr,
           DEVPKEY_Device_ProblemCode.get_const_ptr(),
-          PropertyType.get_mut_ptr(),
-          ProblemCode.get_mut_ptr().cast(),
-          csizeof!(=ProblemCode),
+          property_type.get_mut_ptr(),
+          problem_code.get_mut_ptr().cast(),
+          csizeof!(=problem_code),
           std::ptr::null_mut(),
           0,
         )
       }
-      || (PropertyType != DEVPROP_TYPE_INT32 && PropertyType != DEVPROP_TYPE_UINT32)
+      || (property_type != DEVPROP_TYPE_INT32 && property_type != DEVPROP_TYPE_UINT32)
     {
-      ProblemCode = 0;
+      problem_code = 0;
     }
     return Err(error!(
       ERROR_DEVICE_REINITIALIZATION_NEEDED,
-      "Failed to setup adapter (problem code: 0x{:x})", ProblemCode
+      "Failed to setup adapter (problem code: 0x{:x})", problem_code
     ));
   }
 
-  cleanupDevice.forget();
-  cleanupDriverInfo.run();
-  cleanupDevInfo.run();
+  cleanup_device.forget();
+  cleanup_driver_info.run();
+  cleanup_dev_info.run();
   Ok(())
 }
 
@@ -342,21 +342,21 @@ fn init_instance_not_wow64(
       "Failed to create new device information element"
     ));
   }
-  let mut DevInstallParams = SP_DEVINSTALL_PARAMS_W {
+  let mut dev_install_params = SP_DEVINSTALL_PARAMS_W {
     cbSize: csizeof!(SP_DEVINSTALL_PARAMS_W),
     ..unsafe { std::mem::zeroed() }
   };
   if unsafe {
-    SetupDiGetDeviceInstallParamsW(dev_info, dev_info_data_ptr, DevInstallParams.get_mut_ptr())
+    SetupDiGetDeviceInstallParamsW(dev_info, dev_info_data_ptr, dev_install_params.get_mut_ptr())
   } == FALSE
   {
     return Err(last_error!(
       "Failed to retrieve adapter device installation parameters"
     ));
   }
-  DevInstallParams.Flags |= DI_QUIETINSTALL;
+  dev_install_params.Flags |= DI_QUIETINSTALL;
   if unsafe {
-    SetupDiSetDeviceInstallParamsW(dev_info, dev_info_data_ptr, DevInstallParams.get_mut_ptr())
+    SetupDiSetDeviceInstallParamsW(dev_info, dev_info_data_ptr, dev_install_params.get_mut_ptr())
   } == FALSE
   {
     return Err(last_error!(
@@ -366,7 +366,7 @@ fn init_instance_not_wow64(
   if FALSE == unsafe { SetupDiSetSelectedDevice(dev_info, dev_info_data_ptr) } {
     return Err(last_error!("Failed to select adapter device"));
   }
-  const Hwids: [WCHAR; 8] = wide_array!("Wintun"; 8);
+  const HWIDS: [WCHAR; 8] = wide_array!("Wintun"; 8);
   // static const WCHAR Hwids[_countof(WINTUN_HWID) + 1 /*Multi-string terminator*/] = WINTUN_HWID;
   if FALSE
     == unsafe {
@@ -374,8 +374,8 @@ fn init_instance_not_wow64(
         dev_info,
         dev_info_data_ptr,
         SPDRP_HARDWAREID,
-        Hwids.as_ptr().cast(),
-        csizeof!(=Hwids),
+        HWIDS.as_ptr().cast(),
+        csizeof!(=HWIDS),
       )
     }
   {
@@ -385,10 +385,10 @@ fn init_instance_not_wow64(
   {
     return Err(last_error!("Failed building adapter driver info list"));
   }
-  unsafe_defer! { cleanupDriverInfo <-
+  unsafe_defer! { cleanup_driver_info <-
     SetupDiDestroyDriverInfoList(dev_info, dev_info_data_ptr, SPDIT_COMPATDRIVER);
   };
-  let mut DrvInfoData = SP_DRVINFO_DATA_W {
+  let mut drv_info_data = SP_DRVINFO_DATA_W {
     cbSize: csizeof!(SP_DRVINFO_DATA_W),
     ..unsafe { std::mem::zeroed() }
   };
@@ -399,12 +399,12 @@ fn init_instance_not_wow64(
         dev_info_data_ptr,
         SPDIT_COMPATDRIVER,
         0,
-        DrvInfoData.get_mut_ptr(),
+        drv_info_data.get_mut_ptr(),
       )
     }
     || FALSE
       == unsafe {
-        SetupDiSetSelectedDriverW(dev_info, dev_info_data_ptr, DrvInfoData.get_mut_ptr())
+        SetupDiSetSelectedDriverW(dev_info, dev_info_data_ptr, drv_info_data.get_mut_ptr())
       }
   {
     return Err(error!(
@@ -427,22 +427,22 @@ fn init_instance_not_wow64(
   {
     last_error!("Failed to install adapter interfaces");
   }
-  unsafe_defer! { cleanupDevice <- move
-    drop(AdapterRemoveInstance(dev_info, dev_info_data_ptr));
+  unsafe_defer! { cleanup_device <- move
+    drop(adapter_remove_instance(dev_info, dev_info_data_ptr));
   };
   if FALSE == unsafe { SetupDiCallClassInstaller(DIF_INSTALLDEVICE, dev_info, dev_info_data_ptr) } {
     return Err(last_error!("Failed to install adapter device"));
   }
-  cleanupDevice.forget();
-  cleanupDriverInfo.forget();
+  cleanup_device.forget();
+  cleanup_driver_info.forget();
   Ok(())
 }
 
 pub fn create_adapter_post_win7(adapter: &mut Adapter, tunnel_type: &WideCStr) {
   unsafe {
     SetupDiSetDeviceRegistryPropertyW(
-      adapter.DevInfo,
-      adapter.DevInfoData.get_mut_ptr(),
+      adapter.dev_info,
+      adapter.dev_info_data.get_mut_ptr(),
       SPDRP_FRIENDLYNAME,
       tunnel_type.as_ptr().cast(),
       tunnel_type.sizeof(),
@@ -450,8 +450,8 @@ pub fn create_adapter_post_win7(adapter: &mut Adapter, tunnel_type: &WideCStr) {
   };
   unsafe {
     SetupDiSetDeviceRegistryPropertyW(
-      adapter.DevInfo,
-      adapter.DevInfoData.get_mut_ptr(),
+      adapter.dev_info,
+      adapter.dev_info_data.get_mut_ptr(),
       SPDRP_DEVICEDESC,
       tunnel_type.as_ptr().cast(),
       tunnel_type.sizeof(),
@@ -460,40 +460,40 @@ pub fn create_adapter_post_win7(adapter: &mut Adapter, tunnel_type: &WideCStr) {
 }
 
 pub fn process_is_stale(owning_process: &mut OwningProcess) -> bool {
-  let Process = unsafe {
+  let process = unsafe {
     OpenProcess(
       PROCESS_QUERY_LIMITED_INFORMATION,
       FALSE,
-      owning_process.ProcessId,
+      owning_process.process_id,
     )
   };
-  if !check_handle(Process) {
+  if !check_handle(process) {
     return true;
   }
-  let mut CreationTime: FILETIME = unsafe { std::mem::zeroed() };
-  let mut Unused: FILETIME = unsafe { std::mem::zeroed() };
-  unsafe_defer! { cleanupProcess <-
-    CloseHandle(Process);
+  let mut creation_time: FILETIME = unsafe { std::mem::zeroed() };
+  let mut unused: FILETIME = unsafe { std::mem::zeroed() };
+  unsafe_defer! { cleanup_process <-
+    CloseHandle(process);
   }
   if unsafe {
     GetProcessTimes(
-      Process,
-      CreationTime.get_mut_ptr(),
-      Unused.get_mut_ptr(),
-      Unused.get_mut_ptr(),
-      Unused.get_mut_ptr(),
+      process,
+      creation_time.get_mut_ptr(),
+      unused.get_mut_ptr(),
+      unused.get_mut_ptr(),
+      unused.get_mut_ptr(),
     )
   } == FALSE
   {
     return false;
   }
-  cleanupProcess.run();
-  return CreationTime.dwHighDateTime == owning_process.CreationTime.dwHighDateTime
-    && CreationTime.dwLowDateTime == owning_process.CreationTime.dwLowDateTime;
+  cleanup_process.run();
+  return creation_time.dwHighDateTime == owning_process.creation_time.dwHighDateTime
+    && creation_time.dwLowDateTime == owning_process.creation_time.dwLowDateTime;
 }
 
 pub fn cleanup_orphaned_devices_win7() {
-  let DevInfo = unsafe {
+  let dev_info = unsafe {
     SetupDiGetClassDevsExW(
       GUID_DEVCLASS_NET.get_const_ptr(),
       WINTUN_ENUMERATOR!().as_ptr(),
@@ -504,70 +504,70 @@ pub fn cleanup_orphaned_devices_win7() {
       std::ptr::null_mut(),
     )
   };
-  if !check_handle(DevInfo) {
+  if !check_handle(dev_info) {
     if get_last_error_code() != ERROR_INVALID_DATA {
       last_error!("Failed to get adapters");
     }
     return;
   }
 
-  let mut DevInfoData = SP_DEVINFO_DATA {
+  let mut dev_info_data = SP_DEVINFO_DATA {
     cbSize: csizeof!(SP_DEVINFO_DATA),
     ..unsafe { std::mem::zeroed() }
   };
-  for EnumIndex in 0.. {
-    if FALSE == unsafe { SetupDiEnumDeviceInfo(DevInfo, EnumIndex, DevInfoData.get_mut_ptr()) } {
+  for enum_index in 0.. {
+    if FALSE == unsafe { SetupDiEnumDeviceInfo(dev_info, enum_index, dev_info_data.get_mut_ptr()) } {
       if get_last_error_code() == ERROR_NO_MORE_ITEMS {
         break;
       }
       continue;
     }
 
-    let mut OwningProcess: OwningProcess = unsafe { std::mem::zeroed() };
-    let mut PropType: DEVPROPTYPE = 0;
+    let mut owning_process: OwningProcess = unsafe { std::mem::zeroed() };
+    let mut prop_type: DEVPROPTYPE = 0;
     if TRUE
       == unsafe {
         SetupDiGetDevicePropertyW(
-          DevInfo,
-          DevInfoData.get_mut_ptr(),
+          dev_info,
+          dev_info_data.get_mut_ptr(),
           DEVPKEY_WINTUN_OWNING_PROCESS.get_const_ptr(),
-          PropType.get_mut_ptr(),
-          OwningProcess.get_mut_ptr().cast(),
-          csizeof!(=OwningProcess),
+          prop_type.get_mut_ptr(),
+          owning_process.get_mut_ptr().cast(),
+          csizeof!(=owning_process),
           std::ptr::null_mut(),
           0,
         )
       }
-      && PropType == DEVPROP_TYPE_BINARY
-      && !process_is_stale(&mut OwningProcess)
+      && prop_type == DEVPROP_TYPE_BINARY
+      && !process_is_stale(&mut owning_process)
     {
       continue;
     }
 
-    let mut Name = static_widecstr!("<unknown>"; MAX_ADAPTER_NAME);
+    let mut name = static_widecstr!("<unknown>"; MAX_ADAPTER_NAME);
     unsafe {
       SetupDiGetDevicePropertyW(
-        DevInfo,
-        DevInfoData.get_mut_ptr(),
-        DEVPKEY_Wintun_Name.get_const_ptr(),
-        PropType.get_mut_ptr(),
-        Name.get_mut_ptr().cast(),
-        Name.sizeof(),
+        dev_info,
+        dev_info_data.get_mut_ptr(),
+        DEVPKEY_WINTUN_NAME.get_const_ptr(),
+        prop_type.get_mut_ptr(),
+        name.get_mut_ptr().cast(),
+        name.sizeof(),
         std::ptr::null_mut(),
         0,
       )
     };
-    if let Err(err) = AdapterRemoveInstance(DevInfo, DevInfoData.get_mut_ptr()) {
+    if let Err(err) = adapter_remove_instance(dev_info, dev_info_data.get_mut_ptr()) {
       error!(
         err,
         "Failed to remove orphaned adapter \"{}\"",
-        Name.display()
+        name.display()
       );
       continue;
     }
-    info!("Removed orphaned adapter \"{}\"", Name.display());
+    info!("Removed orphaned adapter \"{}\"", name.display());
   }
-  unsafe { SetupDiDestroyDeviceInfoList(DevInfo) };
+  unsafe { SetupDiDestroyDeviceInfoList(dev_info) };
 }
 
 pub fn cleanup_lagacy_devices() {
@@ -589,35 +589,35 @@ pub fn cleanup_lagacy_devices() {
     cbSize: csizeof!(SP_DEVINFO_DATA),
     ..unsafe { std::mem::zeroed() }
   };
-  for EnumIndex in 0.. {
-    if FALSE == unsafe { SetupDiEnumDeviceInfo(dev_info, EnumIndex, dev_info_data.get_mut_ptr()) } {
+  for enum_index in 0.. {
+    if FALSE == unsafe { SetupDiEnumDeviceInfo(dev_info, enum_index, dev_info_data.get_mut_ptr()) } {
       if get_last_error_code() == ERROR_NO_MORE_ITEMS {
         break;
       }
       continue;
     }
-    let mut HardwareIDs = StaticWideCStr::<0x400>::zeroed();
-    let mut ValueType = 0;
-    let mut Size = HardwareIDs.sizeof();
+    let mut hardware_ids = StaticWideCStr::<0x400>::zeroed();
+    let mut value_type = 0;
+    let mut size = hardware_ids.sizeof();
     if FALSE
       == unsafe {
         SetupDiGetDeviceRegistryPropertyW(
           dev_info,
           dev_info_data.get_mut_ptr(),
           SPDRP_HARDWAREID,
-          ValueType.get_mut_ptr(),
-          HardwareIDs.get_mut_ptr().cast(),
-          Size,
-          Size.get_mut_ptr(),
+          value_type.get_mut_ptr(),
+          hardware_ids.get_mut_ptr().cast(),
+          size,
+          size.get_mut_ptr(),
         )
       }
-      || Size > HardwareIDs.sizeof()
+      || size > hardware_ids.sizeof()
     {
       continue;
     }
-    for s in HardwareIDs.iter_strs() {
+    for s in hardware_ids.iter_strs() {
       if s == WINTUN_HWID {
-        drop(AdapterRemoveInstance(dev_info, dev_info_data.get_mut_ptr()));
+        drop(adapter_remove_instance(dev_info, dev_info_data.get_mut_ptr()));
         break;
       }
     }

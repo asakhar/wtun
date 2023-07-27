@@ -1,11 +1,13 @@
-use cutils::{inspection::GetPtrExt, set_last_error, strings::WideCString, widecstr, widecstring, csizeof};
+use cutils::{
+  csizeof, inspection::GetPtrExt, set_last_error, strings::WideCString, widecstr, widecstring,
+};
 use winapi::shared::{
   minwindef::{DWORD, HKEY, ULONG},
   ntdef::{NTSTATUS, NT_SUCCESS, WCHAR},
 };
 
 use crate::{
-  ntdll::{NtQueryKey, KEY_NAME_INFORMATION},
+  ntdll::{KeyNameInformation, NtQueryKey},
   registry::{RegKey, MAX_REG_PATH},
 };
 
@@ -69,41 +71,46 @@ pub(crate) use macro_impl::last_error;
 pub(crate) use macro_impl::log;
 pub(crate) use macro_impl::warn;
 
-fn LoggerGetRegistryKeyPathImpl(Key: HKEY) -> WideCString {
-  if Key.is_null() {
+fn logger_get_registry_key_path_impl(key: HKEY) -> WideCString {
+  if key.is_null() {
     return widecstr!("<null>").to_owned();
   }
-  let error_case_ret = widecstring!("0x{:p}", Key);
-  let mut KeyNameInfo: KEY_NAME_INFORMATION = KEY_NAME_INFORMATION {
-    NameLength: 0,
-    Name: [0; MAX_REG_PATH],
+  let error_case_ret = widecstring!("0x{:p}", key);
+  let mut key_name_info: KeyNameInformation = KeyNameInformation {
+    name_length: 0,
+    name: [0; MAX_REG_PATH],
   };
-  let mut Size: DWORD = 0;
+  let mut size: DWORD = 0;
   if NT_SUCCESS(unsafe {
     NtQueryKey(
-      Key.cast(),
+      key.cast(),
       3,
-      KeyNameInfo.get_mut_ptr() as *mut _,
-      csizeof!(KEY_NAME_INFORMATION),
-      Size.get_mut_ptr(),
+      key_name_info.get_mut_ptr() as *mut _,
+      csizeof!(KeyNameInformation),
+      size.get_mut_ptr(),
     )
   } as NTSTATUS)
   {
     return error_case_ret;
   }
-  if (Size as usize) < KEY_NAME_INFORMATION::OFFSETOF_NAME
-    || KeyNameInfo.NameLength as usize >= MAX_REG_PATH * csizeof!(WCHAR; usize)
+  if (size as usize) < KeyNameInformation::OFFSETOF_NAME
+    || key_name_info.name_length as usize >= MAX_REG_PATH * csizeof!(WCHAR; usize)
   {
     return error_case_ret;
   }
-  KeyNameInfo.NameLength /= csizeof!(WCHAR; ULONG);
-  unsafe { WideCString::from_ptr_n(KeyNameInfo.Name.as_ptr(), KeyNameInfo.NameLength as usize) }
-    .unwrap_or(error_case_ret)
+  key_name_info.name_length /= csizeof!(WCHAR; ULONG);
+  unsafe {
+    WideCString::from_ptr_n(
+      key_name_info.name.as_ptr(),
+      key_name_info.name_length as usize,
+    )
+  }
+  .unwrap_or(error_case_ret)
 }
 
-pub fn LoggerGetRegistryKeyPath(Key: &RegKey) -> WideCString {
-  let LastError = std::io::Error::last_os_error();
-  let res = LoggerGetRegistryKeyPathImpl(Key.as_raw());
-  set_last_error(LastError);
+pub fn logger_get_registry_key_path(key: &RegKey) -> WideCString {
+  let last_error = std::io::Error::last_os_error();
+  let res = logger_get_registry_key_path_impl(key.as_raw());
+  set_last_error(last_error);
   res
 }

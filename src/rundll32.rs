@@ -80,11 +80,11 @@ fn execute_rundll32(function: &str, arguments: &[&str]) -> std::io::Result<Vec<u
     Ok(res) => res,
     Err(err) => return Err(error!(err, "Failed to create temporary folder")),
   };
-  defer! { cleanupDirectory <-
+  defer! { cleanup_directory <-
     drop(std::fs::remove_dir_all(&random_temp_subdir));
   };
   let dll_path = random_temp_subdir.join("setupapihost.dll");
-  let native_machine = unsafe { get_system_params().NativeMachine };
+  let native_machine = unsafe { get_system_params().native_machine };
   let resource_id = match native_machine {
     #[cfg(any(feature = "build_amd64_gnu_wow64", feature = "build_amd64_msvc_wow64"))]
     winapi::um::winnt::IMAGE_FILE_MACHINE_AMD64 => ResId::SetupApiHostAmd64,
@@ -97,7 +97,7 @@ fn execute_rundll32(function: &str, arguments: &[&str]) -> std::io::Result<Vec<u
       ))
     }
   };
-  defer! { cleanupDelete <-
+  defer! { cleanup_delete <-
     drop(std::fs::remove_file(&dll_path));
   };
   if let Err(err) = resource::copy_to_file(&dll_path, resource_id) {
@@ -165,8 +165,8 @@ fn execute_rundll32(function: &str, arguments: &[&str]) -> std::io::Result<Vec<u
       return Err(error!(err, "Failed to create process"));
     }
   };
-  cleanupDelete.run();
-  cleanupDirectory.run();
+  cleanup_delete.run();
+  cleanup_directory.run();
   let aligned: Vec<_> = output
     .stdout
     .chunks_exact(2)

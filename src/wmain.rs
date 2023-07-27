@@ -18,16 +18,16 @@ use winapi::{
 };
 
 use crate::{
-  adapter_win7::cleanup_lagacy_devices, logger::last_error, namespace::NamespaceInit,
+  adapter_win7::cleanup_lagacy_devices, logger::last_error, namespace::namespace_init,
   ntdll::RtlGetNtVersionNumbers,
 };
 
 pub struct SystemParams {
-  pub SecurityAttributes: SECURITY_ATTRIBUTES,
-  pub IsLocalSystem: bool,
-  pub NativeMachine: USHORT,
-  pub IsWindows7: bool,
-  pub IsWindows10: bool,
+  pub security_attributes: SECURITY_ATTRIBUTES,
+  pub is_local_system: bool,
+  pub native_machine: USHORT,
+  pub is_windows7: bool,
+  pub is_windows10: bool,
 }
 
 impl std::fmt::Debug for SystemParams {
@@ -43,11 +43,11 @@ impl std::fmt::Debug for SystemParams {
       }
     }
     f.debug_struct("SystemParams")
-      .field("SecurityAttributes", &SecAttrs(&self.SecurityAttributes))
-      .field("IsLocalSystem", &self.IsLocalSystem)
-      .field("NativeMachine", &self.NativeMachine)
-      .field("IsWindows7", &self.IsWindows7)
-      .field("IsWindows10", &self.IsWindows10)
+      .field("SecurityAttributes", &SecAttrs(&self.security_attributes))
+      .field("IsLocalSystem", &self.is_local_system)
+      .field("NativeMachine", &self.native_machine)
+      .field("IsWindows7", &self.is_windows7)
+      .field("IsWindows10", &self.is_windows10)
       .finish()
   }
 }
@@ -55,59 +55,59 @@ unsafe impl Sync for SystemParams {}
 pub unsafe fn get_system_params<'a>() -> &'a mut SystemParams {
   static mut SYSTEM_PARAMS: std::cell::UnsafeCell<SystemParams> =
     std::cell::UnsafeCell::new(SystemParams {
-      SecurityAttributes: SECURITY_ATTRIBUTES {
+      security_attributes: SECURITY_ATTRIBUTES {
         nLength: csizeof!(SECURITY_ATTRIBUTES),
         lpSecurityDescriptor: std::ptr::null_mut(),
         bInheritHandle: 0,
       },
-      IsLocalSystem: false,
-      NativeMachine: 0,
-      IsWindows7: false,
-      IsWindows10: true,
+      is_local_system: false,
+      native_machine: 0,
+      is_windows7: false,
+      is_windows10: true,
     });
   static mut INIT: std::sync::OnceLock<&'static std::cell::UnsafeCell<SystemParams>> =
     std::sync::OnceLock::new();
   &mut *INIT
     .get_or_init(|| {
       let params = &mut *SYSTEM_PARAMS.get();
-      let (SecurityAttributes, IsLocalSystem) = InitializeSecurityObjects().unwrap();
-      let (IsWindows7, IsWindows10, NativeMachine) = EnvInit();
+      let (security_attributes, is_local_system) = initialize_security_objects().unwrap();
+      let (is_windows7, is_windows10, native_machine) = env_init();
       unsafe {
-        NamespaceInit();
+        namespace_init();
       }
       cleanup_lagacy_devices();
       *params = SystemParams {
-        SecurityAttributes,
-        IsLocalSystem,
-        NativeMachine,
-        IsWindows7,
-        IsWindows10,
+        security_attributes,
+        is_local_system,
+        native_machine,
+        is_windows7,
+        is_windows10,
       };
       &SYSTEM_PARAMS
     })
     .get()
 }
-fn InitializeSecurityObjects() -> std::io::Result<(SECURITY_ATTRIBUTES, bool)> {
-  let mut SecurityAttributes = SECURITY_ATTRIBUTES {
+fn initialize_security_objects() -> std::io::Result<(SECURITY_ATTRIBUTES, bool)> {
+  let mut security_attributes = SECURITY_ATTRIBUTES {
     nLength: csizeof!(SECURITY_ATTRIBUTES),
     lpSecurityDescriptor: std::ptr::null_mut(),
     bInheritHandle: 0,
   };
-  let mut LocalSystemSid = [0u8; MAX_SID_SIZE];
-  let mut RequiredBytes: DWORD = csizeof!(=LocalSystemSid);
-  let mut CurrentProcessToken: HANDLE = std::ptr::null_mut();
+  let mut local_system_sid = [0u8; MAX_SID_SIZE];
+  let mut required_bytes: DWORD = csizeof!(=local_system_sid);
+  let mut current_process_token: HANDLE = std::ptr::null_mut();
   #[repr(C)]
   struct TokenUserStruct {
-    MaybeLocalSystem: TOKEN_USER,
-    LargeEnoughForLocalSystem: [u8; MAX_SID_SIZE],
+    maybe_local_system: TOKEN_USER,
+    large_enough_for_local_system: [u8; MAX_SID_SIZE],
   }
-  let mut TokenUserBuffer: TokenUserStruct = unsafe { std::mem::zeroed() };
+  let mut token_user_buffer: TokenUserStruct = unsafe { std::mem::zeroed() };
   if unsafe {
     CreateWellKnownSid(
       WinLocalSystemSid,
       std::ptr::null_mut(),
-      LocalSystemSid.as_mut_ptr().cast(),
-      RequiredBytes.get_mut_ptr(),
+      local_system_sid.as_mut_ptr().cast(),
+      required_bytes.get_mut_ptr(),
     )
   } == FALSE
   {
@@ -117,35 +117,35 @@ fn InitializeSecurityObjects() -> std::io::Result<(SECURITY_ATTRIBUTES, bool)> {
     OpenProcessToken(
       GetCurrentProcess(),
       TOKEN_QUERY,
-      CurrentProcessToken.get_mut_ptr(),
+      current_process_token.get_mut_ptr(),
     )
   } == FALSE
   {
     return Err(last_error!("Failed to open process token"));
   }
-  unsafe_defer! { cleanupProcessToken <-
-    CloseHandle(CurrentProcessToken);
+  unsafe_defer! { cleanup_process_token <-
+    CloseHandle(current_process_token);
   };
   if unsafe {
     GetTokenInformation(
-      CurrentProcessToken,
+      current_process_token,
       TokenUser,
-      TokenUserBuffer.get_mut_ptr().cast(),
+      token_user_buffer.get_mut_ptr().cast(),
       csizeof!(TokenUserStruct),
-      RequiredBytes.get_mut_ptr(),
+      required_bytes.get_mut_ptr(),
     )
   } == FALSE
   {
     return Err(last_error!("Failed to get process information"));
   }
 
-  let IsLocalSystem = unsafe {
+  let is_local_system = unsafe {
     EqualSid(
-      TokenUserBuffer.MaybeLocalSystem.User.Sid,
-      LocalSystemSid.as_mut_ptr().cast(),
+      token_user_buffer.maybe_local_system.User.Sid,
+      local_system_sid.as_mut_ptr().cast(),
     )
   } == TRUE;
-  let string_sec_desc = if IsLocalSystem {
+  let string_sec_desc = if is_local_system {
     widecstr!("O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)S:(ML;;NWNRNX;;;HI)")
   } else {
     widecstr!("O:BAD:P(A;;GA;;;SY)(A;;GA;;;BA)S:(ML;;NWNRNX;;;HI)")
@@ -154,7 +154,7 @@ fn InitializeSecurityObjects() -> std::io::Result<(SECURITY_ATTRIBUTES, bool)> {
     ConvertStringSecurityDescriptorToSecurityDescriptorW(
       string_sec_desc.as_ptr(),
       SDDL_REVISION_1 as _,
-      SecurityAttributes.lpSecurityDescriptor.get_mut_ptr(),
+      security_attributes.lpSecurityDescriptor.get_mut_ptr(),
       std::ptr::null_mut(),
     )
   } == FALSE
@@ -163,28 +163,28 @@ fn InitializeSecurityObjects() -> std::io::Result<(SECURITY_ATTRIBUTES, bool)> {
       "Failed to convert string security descriptor to security descriptor"
     ));
   }
-  cleanupProcessToken.run();
-  Ok((SecurityAttributes, IsLocalSystem))
+  cleanup_process_token.run();
+  Ok((security_attributes, is_local_system))
 }
-fn EnvInit() -> (bool, bool, USHORT) {
-  let mut MajorVersion = 0;
-  let mut MinorVersion = 0;
+fn env_init() -> (bool, bool, USHORT) {
+  let mut major_version = 0;
+  let mut minor_version = 0;
   unsafe {
     RtlGetNtVersionNumbers(
-      MajorVersion.get_mut_ptr(),
-      MinorVersion.get_mut_ptr(),
+      major_version.get_mut_ptr(),
+      minor_version.get_mut_ptr(),
       std::ptr::null_mut(),
     )
   };
   #[cfg(feature = "windows7")]
-  let IsWindows7 = MajorVersion == 6 && MinorVersion == 1;
+  let is_windows7 = MajorVersion == 6 && MinorVersion == 1;
   #[cfg(not(feature = "windows7"))]
-  let IsWindows7 = false;
+  let is_windows7 = false;
   #[cfg(feature = "windows10")]
-  let IsWindows10 = true;
+  let is_windows10 = true;
   #[cfg(not(feature = "windows10"))]
-  let IsWindows10 = MajorVersion > 10;
-  let mut NativeMachine = IMAGE_FILE_PROCESS;
+  let is_windows10 = MajorVersion > 10;
+  let mut native_machine = IMAGE_FILE_PROCESS;
   #[cfg(any(target_arch = "x86", target_arch = "arm", target_arch = "x86_64"))]
   {
     type IsWow64Process2Func = unsafe extern "system" fn(
@@ -192,12 +192,12 @@ fn EnvInit() -> (bool, bool, USHORT) {
       ProcessMachine: *mut USHORT,
       NativeMachine: *mut USHORT,
     ) -> winapi::shared::minwindef::BOOL;
-    let mut ProcessMachine: USHORT = 0;
+    let mut process_machine: USHORT = 0;
     let kernel32 = unsafe { GetModuleHandleW(widecstr!("kernel32.dll").as_ptr()) };
     let get_native_machine = || {
-      let mut IsWoW64: BOOL = FALSE;
-      let cond = unsafe { IsWow64Process(GetCurrentProcess(), IsWoW64.get_mut_ptr()) } == TRUE
-        && IsWoW64 == TRUE;
+      let mut is_wow64: BOOL = FALSE;
+      let cond = unsafe { IsWow64Process(GetCurrentProcess(), is_wow64.get_mut_ptr()) } == TRUE
+        && is_wow64 == TRUE;
       return if cond {
         IMAGE_FILE_MACHINE_AMD64
       } else {
@@ -205,26 +205,26 @@ fn EnvInit() -> (bool, bool, USHORT) {
       };
     };
     if kernel32.is_null() {
-      return (IsWindows7, IsWindows10, get_native_machine());
+      return (is_windows7, is_windows10, get_native_machine());
     }
-    let IsWow64Process2 =
+    let is_wow64_process2 =
       unsafe { GetProcAddress(kernel32, cstr!("IsWow64Process2").as_ptr().cast()) };
-    if IsWow64Process2.is_null() {
-      return (IsWindows7, IsWindows10, get_native_machine());
+    if is_wow64_process2.is_null() {
+      return (is_windows7, is_windows10, get_native_machine());
     }
-    let IsWow64Process2: IsWow64Process2Func = unsafe { std::mem::transmute(IsWow64Process2) };
+    let is_wow64_process2: IsWow64Process2Func = unsafe { std::mem::transmute(is_wow64_process2) };
     if unsafe {
-      IsWow64Process2(
+      is_wow64_process2(
         GetCurrentProcess(),
-        ProcessMachine.get_mut_ptr(),
-        NativeMachine.get_mut_ptr(),
+        process_machine.get_mut_ptr(),
+        native_machine.get_mut_ptr(),
       )
     } == FALSE
     {
-      return (IsWindows7, IsWindows10, get_native_machine());
+      return (is_windows7, is_windows10, get_native_machine());
     }
   }
-  (IsWindows7, IsWindows10, NativeMachine)
+  (is_windows7, is_windows10, native_machine)
 }
 
 #[cfg(target_arch = "x86")]

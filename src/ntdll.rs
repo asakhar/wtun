@@ -7,62 +7,63 @@ use winapi::shared::{
 
 use crate::registry::MAX_REG_PATH;
 
-pub const SystemModuleInformation: i32 = 11;
+pub const SYSTEM_MODULE_INFORMATION: i32 = 11;
 
 #[repr(C)]
-pub struct RTL_PROCESS_MODULE_INFORMATION {
-  pub Section: HANDLE,
-  pub MappedBase: PVOID,
-  pub ImageBase: PVOID,
-  pub ImageSize: ULONG,
-  pub Flags: ULONG,
-  pub LoadOrderIndex: USHORT,
-  pub InitOrderIndex: USHORT,
-  pub LoadCount: USHORT,
-  pub OffsetToFileName: USHORT,
-  pub FullPathName: [UCHAR; 256],
+pub struct RtlProcessModuleInformation {
+  pub section: HANDLE,
+  pub mapped_base: PVOID,
+  pub image_base: PVOID,
+  pub image_size: ULONG,
+  pub flags: ULONG,
+  pub load_order_index: USHORT,
+  pub init_order_index: USHORT,
+  pub load_count: USHORT,
+  pub offset_to_file_name: USHORT,
+  pub full_path_name: [UCHAR; 256],
 }
 
-impl RTL_PROCESS_MODULE_INFORMATION {
+impl RtlProcessModuleInformation {
   pub fn filename(&self) -> Option<&CStr> {
-    unsafe { CStr::from_bytes_until_nul(&self.FullPathName[self.OffsetToFileName as usize..]) }.ok()
+    unsafe { CStr::from_bytes_until_nul(&self.full_path_name[self.offset_to_file_name as usize..]) }
+      .ok()
   }
   pub fn fullpath(&self) -> Option<&CStr> {
-    unsafe { CStr::from_bytes_until_nul(&self.FullPathName) }.ok()
+    unsafe { CStr::from_bytes_until_nul(&self.full_path_name) }.ok()
   }
 }
 #[allow(dead_code)]
-pub type PRTL_PROCESS_MODULE_INFORMATION = *mut RTL_PROCESS_MODULE_INFORMATION;
+pub type PrtlProcessModuleInformation = *mut RtlProcessModuleInformation;
 
 #[repr(C)]
-pub struct RTL_PROCESS_MODULES {
-  NumberOfModules: ULONG,
-  Modules: [RTL_PROCESS_MODULE_INFORMATION; 1],
+pub struct RtlProcessModules {
+  number_of_modules: ULONG,
+  modules: [RtlProcessModuleInformation; 1],
 }
 
-impl RTL_PROCESS_MODULES {
+impl RtlProcessModules {
   pub fn number(&self) -> ULONG {
-    self.NumberOfModules
+    self.number_of_modules
   }
-  pub unsafe fn get_mut(&mut self, idx: ULONG) -> &mut RTL_PROCESS_MODULE_INFORMATION {
-    &mut *self.Modules.as_mut_ptr().add(idx as usize)
+  pub unsafe fn get_mut(&mut self, idx: ULONG) -> &mut RtlProcessModuleInformation {
+    &mut *self.modules.as_mut_ptr().add(idx as usize)
   }
 }
 
 #[allow(dead_code)]
-pub type PRTL_PROCESS_MODULES = *mut RTL_PROCESS_MODULES;
+pub type PrtlProcessModules = *mut RtlProcessModules;
 #[repr(C)]
-pub struct KEY_NAME_INFORMATION {
-  pub NameLength: ULONG,
-  pub Name: [WCHAR; MAX_REG_PATH],
+pub struct KeyNameInformation {
+  pub name_length: ULONG,
+  pub name: [WCHAR; MAX_REG_PATH],
 }
 
-impl KEY_NAME_INFORMATION {
+impl KeyNameInformation {
   pub const OFFSETOF_NAME: usize = std::mem::size_of::<ULONG>();
 }
 
 #[allow(dead_code)]
-pub type PKEY_NAME_INFORMATION = *mut KEY_NAME_INFORMATION;
+pub type PkeyNameInformation = *mut KeyNameInformation;
 #[allow(dead_code)]
 pub const STATUS_INFO_LENGTH_MISMATCH: NTSTATUS = 0xC0000004u32 as NTSTATUS;
 
@@ -90,23 +91,23 @@ extern "system" {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct NtVersionNumbers {
-  MajorVersion: DWORD,
-  MinorVersion: DWORD,
-  BuildNumber: DWORD,
+  major_version: DWORD,
+  minor_version: DWORD,
+  build_number: DWORD,
 }
 
 #[allow(dead_code)]
 pub fn rtl_get_nt_version_numbers() -> NtVersionNumbers {
   let mut version = NtVersionNumbers {
-    MajorVersion: 0,
-    MinorVersion: 0,
-    BuildNumber: 0,
+    major_version: 0,
+    minor_version: 0,
+    build_number: 0,
   };
   unsafe {
     RtlGetNtVersionNumbers(
-      &mut version.MajorVersion as *mut DWORD,
-      &mut version.MinorVersion as *mut DWORD,
-      &mut version.BuildNumber as *mut DWORD,
+      &mut version.major_version as *mut DWORD,
+      &mut version.minor_version as *mut DWORD,
+      &mut version.build_number as *mut DWORD,
     )
   };
   version

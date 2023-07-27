@@ -40,25 +40,25 @@ impl SystemNamedMutexLock {
     Self::take(widecstr!(r"Wintun\Wintun-Device-Installation-Mutex"))
   }
   pub fn take(name: impl AsRef<WideCStr>) -> std::io::Result<Self> {
-    NamespaceRuntimeInit()?;
+    namespace_runtime_init()?;
     let name = name.as_ref();
     let system_params = unsafe { get_system_params() };
-    let Mutex = unsafe {
+    let mutex = unsafe {
       CreateMutexW(
-        system_params.SecurityAttributes.get_mut_ptr(),
+        system_params.security_attributes.get_mut_ptr(),
         FALSE,
         name.as_ptr(),
       )
     };
-    if Mutex.is_null() {
+    if mutex.is_null() {
       return Err(last_error!("Failed to create {} mutex", name.display()));
     }
-    let result = unsafe { WaitForSingleObject(Mutex, INFINITE) };
+    let result = unsafe { WaitForSingleObject(mutex, INFINITE) };
     if !matches!(result, WAIT_OBJECT_0 | WAIT_ABANDONED) {
-      unsafe { CloseHandle(Mutex) };
+      unsafe { CloseHandle(mutex) };
       return Err(last_error!("Failed to get mutex (status: 0x{:x})", result));
     }
-    Ok(SystemNamedMutexLock(Mutex))
+    Ok(SystemNamedMutexLock(mutex))
   }
   pub fn release(self) {
     drop(self)
@@ -74,17 +74,17 @@ impl Drop for SystemNamedMutexLock {
   }
 }
 
-pub unsafe fn NamespaceInit() {
+pub unsafe fn namespace_init() {
   INITIALIZING.init();
 }
 
-pub unsafe fn NamespaceDone() {
+pub unsafe fn namespace_done() {
   let section = unsafe { INITIALIZING.enter() };
-  if !unsafe { PrivateNamespace.is_null() } {
-    ClosePrivateNamespace(PrivateNamespace, 0);
-    DeleteBoundaryDescriptor(BoundaryDescriptor);
-    PrivateNamespace = std::ptr::null_mut();
-    BoundaryDescriptor = std::ptr::null_mut();
+  if !unsafe { PRIVATE_NAMESPACE.is_null() } {
+    ClosePrivateNamespace(PRIVATE_NAMESPACE, 0);
+    DeleteBoundaryDescriptor(BOUNDARY_DESCRIPTOR);
+    PRIVATE_NAMESPACE = std::ptr::null_mut();
+    BOUNDARY_DESCRIPTOR = std::ptr::null_mut();
   }
   section.leave();
   unsafe { INITIALIZING.delete() };
@@ -134,42 +134,42 @@ impl Drop for SystemCriticalSectionLock {
 
 static INITIALIZING: SystemCriticalSection = SystemCriticalSection::new();
 
-static mut PrivateNamespace: HANDLE = std::ptr::null_mut();
-static mut BoundaryDescriptor: HANDLE = std::ptr::null_mut();
+static mut PRIVATE_NAMESPACE: HANDLE = std::ptr::null_mut();
+static mut BOUNDARY_DESCRIPTOR: HANDLE = std::ptr::null_mut();
 
-fn NamespaceRuntimeInit() -> std::io::Result<()> {
+fn namespace_runtime_init() -> std::io::Result<()> {
   let section = unsafe { INITIALIZING.enter() };
-  if !unsafe { PrivateNamespace.is_null() } {
+  if !unsafe { PRIVATE_NAMESPACE.is_null() } {
     return Ok(());
   }
 
-  let mut Sid = [0 as BYTE; MAX_SID_SIZE];
-  let mut SidSize = std::mem::size_of_val(&Sid) as DWORD;
+  let mut sid = [0 as BYTE; MAX_SID_SIZE];
+  let mut sid_size = std::mem::size_of_val(&sid) as DWORD;
   let system_params = unsafe { get_system_params() };
   let result = unsafe {
     CreateWellKnownSid(
-      if system_params.IsLocalSystem {
+      if system_params.is_local_system {
         WinLocalSystemSid
       } else {
         WinBuiltinAdministratorsSid
       },
       std::ptr::null_mut(),
-      Sid.as_mut_ptr() as *mut _,
-      SidSize.get_mut_ptr(),
+      sid.as_mut_ptr() as *mut _,
+      sid_size.get_mut_ptr(),
     )
   };
   if result == FALSE {
     return Err(last_error!("Failed to create SID"));
   }
-  unsafe { BoundaryDescriptor = CreateBoundaryDescriptorW(widecstr!("Wintun").as_ptr(), 0) };
-  if unsafe { BoundaryDescriptor.is_null() } {
+  unsafe { BOUNDARY_DESCRIPTOR = CreateBoundaryDescriptorW(widecstr!("Wintun").as_ptr(), 0) };
+  if unsafe { BOUNDARY_DESCRIPTOR.is_null() } {
     return Err(last_error!("Failed to create boundary descriptor"));
   }
-  unsafe_defer! { cleanupBoundaryDescriptor <-
-    DeleteBoundaryDescriptor(BoundaryDescriptor);
+  unsafe_defer! { cleanup_boundary_descriptor <-
+    DeleteBoundaryDescriptor(BOUNDARY_DESCRIPTOR);
   };
   let result = unsafe {
-    AddSIDToBoundaryDescriptor(BoundaryDescriptor.get_mut_ptr(), Sid.as_mut_ptr() as *mut _)
+    AddSIDToBoundaryDescriptor(BOUNDARY_DESCRIPTOR.get_mut_ptr(), sid.as_mut_ptr() as *mut _)
   };
   if result == FALSE {
     return Err(last_error!("Failed to add SID to boundary descriptor"));
@@ -177,32 +177,32 @@ fn NamespaceRuntimeInit() -> std::io::Result<()> {
   let system_params = unsafe { get_system_params() };
   loop {
     unsafe {
-      PrivateNamespace = CreatePrivateNamespaceW(
-        system_params.SecurityAttributes.get_mut_ptr(),
-        BoundaryDescriptor,
+      PRIVATE_NAMESPACE = CreatePrivateNamespaceW(
+        system_params.security_attributes.get_mut_ptr(),
+        BOUNDARY_DESCRIPTOR,
         widecstr!("Wintun").as_ptr(),
       )
     };
-    if !unsafe { PrivateNamespace.is_null() } {
+    if !unsafe { PRIVATE_NAMESPACE.is_null() } {
       break;
     }
-    let LastError = get_last_error_code();
-    if LastError != ERROR_ALREADY_EXISTS {
-      return Err(error!(LastError, "Failed to create private namespace"));
+    let last_error = get_last_error_code();
+    if last_error != ERROR_ALREADY_EXISTS {
+      return Err(error!(last_error, "Failed to create private namespace"));
     }
     unsafe {
-      PrivateNamespace = OpenPrivateNamespaceW(BoundaryDescriptor, widecstr!("Wintun").as_ptr())
+      PRIVATE_NAMESPACE = OpenPrivateNamespaceW(BOUNDARY_DESCRIPTOR, widecstr!("Wintun").as_ptr())
     };
-    if !unsafe { PrivateNamespace.is_null() } {
+    if !unsafe { PRIVATE_NAMESPACE.is_null() } {
       break;
     }
-    let LastError = get_last_error_code();
-    if LastError == ERROR_PATH_NOT_FOUND {
+    let last_error = get_last_error_code();
+    if last_error == ERROR_PATH_NOT_FOUND {
       continue;
     }
-    return Err(error!(LastError, "Failed to open private namespace"));
+    return Err(error!(last_error, "Failed to open private namespace"));
   }
-  cleanupBoundaryDescriptor.forget();
+  cleanup_boundary_descriptor.forget();
   section.leave();
   Ok(())
 }

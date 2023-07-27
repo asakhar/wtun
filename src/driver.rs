@@ -38,12 +38,12 @@ use winapi::{
 
 use crate::{
   adapter::{
-    AdapterCleanupOrphanedDevices, AdapterDisableInstance, AdapterEnableInstance,
-    DEVPKEY_Wintun_Name, WINTUN_ENUMERATOR, WINTUN_HWID,
+    adapter_cleanup_orphaned_devices, adapter_disable_instance, adapter_enable_instance,
+    DEVPKEY_WINTUN_NAME, WINTUN_ENUMERATOR, WINTUN_HWID,
   },
   logger::{error, info, last_error, log, warn, IntoError},
   namespace::SystemNamedMutexLock,
-  ntdll::{SystemModuleInformation, RTL_PROCESS_MODULES},
+  ntdll::{SYSTEM_MODULE_INFORMATION, RtlProcessModules},
   resource::{copy_to_file, create_temp_dir, ResId},
   winapi_ext::{
     shlwapi::PathFindFileNameW,
@@ -56,19 +56,19 @@ use crate::{
 
 use std::collections::LinkedList;
 
-pub type SP_DEVINFO_DATA_LIST = LinkedList<SP_DEVINFO_DATA>;
+pub type SpDevinfoDataList = LinkedList<SP_DEVINFO_DATA>;
 
-fn DisableAllOurAdapters(
-  DevInfo: HDEVINFO,
-  DisabledAdapters: &mut SP_DEVINFO_DATA_LIST,
+fn disable_all_our_adapters(
+  dev_info: HDEVINFO,
+  disabled_adapters: &mut SpDevinfoDataList,
 ) -> std::io::Result<()> {
   let mut overall_result = Ok(());
-  for EnumIndex in 0.. {
+  for enum_index in 0.. {
     let mut device = SP_DEVINFO_DATA {
       cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as DWORD,
       ..unsafe { core::mem::zeroed() }
     };
-    let result = unsafe { SetupDiEnumDeviceInfo(DevInfo, EnumIndex, device.get_mut_ptr()) };
+    let result = unsafe { SetupDiEnumDeviceInfo(dev_info, enum_index, device.get_mut_ptr()) };
     if result == FALSE {
       let error = std::io::Error::last_os_error();
       if error.raw_os_error().unwrap() == ERROR_NO_MORE_ITEMS as i32 {
@@ -83,9 +83,9 @@ fn DisableAllOurAdapters(
     let mut name = static_widecstr!["<unknown>"; MAX_ADAPTER_NAME];
     unsafe {
       SetupDiGetDevicePropertyW(
-        DevInfo,
+        dev_info,
         device.get_mut_ptr(),
-        DEVPKEY_Wintun_Name.get_const_ptr(),
+        DEVPKEY_WINTUN_NAME.get_const_ptr(),
         prop_type.get_mut_ptr(),
         name.as_mut_ptr().cast(),
         name.capacity(),
@@ -112,31 +112,31 @@ fn DisableAllOurAdapters(
       "Disabling adapter \"{}\"",
       name.display()
     );
-    if let Err(err) = AdapterDisableInstance(DevInfo, device.get_mut_ptr()) {
+    if let Err(err) = adapter_disable_instance(dev_info, device.get_mut_ptr()) {
       let err = error!(err, "Failed to disable adapter \"{}\"", name.display());
       if overall_result.is_ok() {
         overall_result = Err(err);
       }
       continue;
     }
-    DisabledAdapters.push_back(device);
+    disabled_adapters.push_back(device);
   }
   overall_result
 }
 
-fn EnableAllOurAdapters(
-  DevInfo: HDEVINFO,
-  AdaptersToEnable: &mut SP_DEVINFO_DATA_LIST,
+fn enable_all_our_adapters(
+  dev_info: HDEVINFO,
+  adapters_to_enable: &mut SpDevinfoDataList,
 ) -> std::io::Result<()> {
   let mut overall_result = Ok(());
-  for device in AdaptersToEnable {
+  for device in adapters_to_enable {
     let mut prop_type: DEVPROPTYPE = 0;
     let mut name = static_widecstr!["<unknown>"; MAX_ADAPTER_NAME];
     unsafe {
       SetupDiGetDevicePropertyW(
-        DevInfo,
+        dev_info,
         device.get_mut_ptr(),
-        DEVPKEY_Wintun_Name.get_const_ptr(),
+        DEVPKEY_WINTUN_NAME.get_const_ptr(),
         prop_type.get_mut_ptr(),
         name.as_mut_ptr().cast(),
         name.capacity(),
@@ -145,7 +145,7 @@ fn EnableAllOurAdapters(
       )
     };
     info!("Enabling adapter: \"{}\"", name.display());
-    if let Err(err) = AdapterEnableInstance(DevInfo, device.get_mut_ptr()) {
+    if let Err(err) = adapter_enable_instance(dev_info, device.get_mut_ptr()) {
       let err = error!(err, "Failed to enable adapter \"{}\"", name.display());
       if overall_result.is_ok() {
         overall_result = Err(err);
@@ -155,37 +155,37 @@ fn EnableAllOurAdapters(
   overall_result
 }
 
-fn IsNewer(
-  DriverDate1: &FILETIME,
-  DriverVersion1: DWORDLONG,
-  DriverDate2: &FILETIME,
-  DriverVersion2: DWORDLONG,
+fn is_newer(
+  driver_date1: &FILETIME,
+  driver_version1: DWORDLONG,
+  driver_date2: &FILETIME,
+  driver_version2: DWORDLONG,
 ) -> bool {
-  if DriverDate1.dwHighDateTime > DriverDate2.dwHighDateTime {
+  if driver_date1.dwHighDateTime > driver_date2.dwHighDateTime {
     return true;
   }
-  if DriverDate1.dwHighDateTime < DriverDate2.dwHighDateTime {
+  if driver_date1.dwHighDateTime < driver_date2.dwHighDateTime {
     return false;
   }
 
-  if DriverDate1.dwLowDateTime > DriverDate2.dwLowDateTime {
+  if driver_date1.dwLowDateTime > driver_date2.dwLowDateTime {
     return true;
   }
-  if DriverDate1.dwLowDateTime < DriverDate2.dwLowDateTime {
+  if driver_date1.dwLowDateTime < driver_date2.dwLowDateTime {
     return false;
   }
 
-  if DriverVersion1 > DriverVersion2 {
+  if driver_version1 > driver_version2 {
     return true;
   }
-  if DriverVersion1 < DriverVersion2 {
+  if driver_version1 < driver_version2 {
     return false;
   }
 
   false
 }
 
-fn VersionOfFile(filename: &WideCStr) -> std::io::Result<DWORD> {
+fn version_of_file(filename: &WideCStr) -> std::io::Result<DWORD> {
   let mut zero = 0;
   let len = unsafe { GetFileVersionInfoSizeW(filename.as_ptr(), zero.get_mut_ptr()) };
   if len == 0 {
@@ -232,15 +232,15 @@ fn VersionOfFile(filename: &WideCStr) -> std::io::Result<DWORD> {
   Ok(version)
 }
 
-fn MaybeGetRunningDriverVersion(
-  ReturnOneIfRunningInsteadOfVersion: bool,
+fn maybe_get_running_driver_version(
+  return_one_if_running_instead_of_version: bool,
 ) -> std::io::Result<DWORD> {
   let mut buffer_size: DWORD = 128 * 1024;
   let mut modules_buf = vec![0u64; (buffer_size / 8) as usize];
   loop {
     let status = unsafe {
       NtQuerySystemInformation(
-        SystemModuleInformation,
+        SYSTEM_MODULE_INFORMATION,
         modules_buf.as_mut_ptr().cast(),
         buffer_size,
         buffer_size.get_mut_ptr(),
@@ -258,14 +258,14 @@ fn MaybeGetRunningDriverVersion(
       "Failed to enumerate drivers"
     ));
   }
-  let modules: &mut RTL_PROCESS_MODULES = unsafe { &mut *(modules_buf.as_mut_ptr().cast()) };
+  let modules: &mut RtlProcessModules = unsafe { &mut *(modules_buf.as_mut_ptr().cast()) };
   for i in (1..modules.number()).rev() {
     let module = unsafe { modules.get_mut(i) };
     let Some(nt_filename) = module.filename() else {
       continue;
     };
     if nt_filename.to_str().unwrap_or("") == "wintun.sys" {
-      if ReturnOneIfRunningInsteadOfVersion {
+      if return_one_if_running_instead_of_version {
         return Ok(1);
       }
       let Some(fullpath) = module.fullpath() else {
@@ -275,7 +275,7 @@ fn MaybeGetRunningDriverVersion(
         continue;
       };
       let filepath = widecstring!(r"\\?\GLOBALROOT{}", fullpath);
-      return VersionOfFile(filepath.as_ref());
+      return version_of_file(filepath.as_ref());
     }
   }
   Err(std::io::Error::from_raw_os_error(
@@ -284,16 +284,16 @@ fn MaybeGetRunningDriverVersion(
 }
 
 pub fn get_running_driver_version() -> std::io::Result<DWORD> {
-  MaybeGetRunningDriverVersion(false)
+  maybe_get_running_driver_version(false)
 }
 
-pub fn EnsureWintunUnloaded() -> bool {
+pub fn ensure_wintun_unloaded() -> bool {
   let mut loaded = true;
   for tries in 0..1500 {
     if tries == 0 {
       std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    loaded = matches!(MaybeGetRunningDriverVersion(true), Ok(v) if v != 0);
+    loaded = matches!(maybe_get_running_driver_version(true), Ok(v) if v != 0);
     if loaded {
       break;
     }
@@ -301,25 +301,25 @@ pub fn EnsureWintunUnloaded() -> bool {
   !loaded
 }
 
-pub fn DriverInstallDeferredCleanup(
-  DevInfoExistingAdapters: HDEVINFO,
-  ExistingAdapters: &mut SP_DEVINFO_DATA_LIST,
+pub fn driver_install_deferred_cleanup(
+  dev_info_existing_adapters: HDEVINFO,
+  existing_adapters: &mut SpDevinfoDataList,
 ) {
-  if !ExistingAdapters.is_empty() {
-    drop(EnableAllOurAdapters(
-      DevInfoExistingAdapters,
-      ExistingAdapters,
+  if !existing_adapters.is_empty() {
+    drop(enable_all_our_adapters(
+      dev_info_existing_adapters,
+      existing_adapters,
     ));
-    ExistingAdapters.clear();
+    existing_adapters.clear();
   }
-  if check_handle(DevInfoExistingAdapters) {
-    unsafe { SetupDiDestroyDeviceInfoList(DevInfoExistingAdapters) };
+  if check_handle(dev_info_existing_adapters) {
+    unsafe { SetupDiDestroyDeviceInfoList(dev_info_existing_adapters) };
   }
 }
 
-pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
-  let DriverInstallationLock = SystemNamedMutexLock::take_driver_installation_mutex()?;
-  let DevInfo = unsafe {
+pub fn driver_install() -> std::io::Result<(HDEVINFO, SpDevinfoDataList)> {
+  let driver_installation_lock = SystemNamedMutexLock::take_driver_installation_mutex()?;
+  let dev_info = unsafe {
     SetupDiCreateDeviceInfoListExW(
       GUID_DEVCLASS_NET.get_const_ptr(),
       std::ptr::null_mut(),
@@ -327,25 +327,25 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
       std::ptr::null_mut(),
     )
   };
-  if !check_handle(DevInfo) {
+  if !check_handle(dev_info) {
     return Err(last_error!("Failed to create empty device information set"));
   }
 
-  unsafe_defer! { cleanupDevInfo <- SetupDiDestroyDeviceInfoList(DevInfo); };
+  unsafe_defer! { cleanup_dev_info <- SetupDiDestroyDeviceInfoList(dev_info); };
 
-  let mut DevInfoData = SP_DEVINFO_DATA {
+  let mut dev_info_data = SP_DEVINFO_DATA {
     cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as DWORD,
     ..unsafe { std::mem::zeroed() }
   };
   let result = unsafe {
     SetupDiCreateDeviceInfoW(
-      DevInfo,
+      dev_info,
       WINTUN_HWID.as_ptr(),
       GUID_DEVCLASS_NET.get_const_ptr(),
       std::ptr::null(),
       std::ptr::null_mut(),
       DICD_GENERATE_ID,
-      DevInfoData.get_mut_ptr(),
+      dev_info_data.get_mut_ptr(),
     )
   };
   if result == FALSE {
@@ -356,8 +356,8 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
   let hwids = static_widecstr!("Wintun"; 8);
   let result = unsafe {
     SetupDiSetDeviceRegistryPropertyW(
-      DevInfo,
-      DevInfoData.get_mut_ptr(),
+      dev_info,
+      dev_info_data.get_mut_ptr(),
       SPDRP_HARDWAREID,
       hwids.as_ptr().cast(),
       hwids.sizeof(),
@@ -367,33 +367,33 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
     return Err(last_error!("Failed to set adapter hardware ID"));
   }
   let result =
-    unsafe { SetupDiBuildDriverInfoList(DevInfo, DevInfoData.get_mut_ptr(), SPDIT_COMPATDRIVER) };
+    unsafe { SetupDiBuildDriverInfoList(dev_info, dev_info_data.get_mut_ptr(), SPDIT_COMPATDRIVER) };
   if result == FALSE {
     return Err(last_error!("Failed building adapter driver info list"));
   }
-  let DevInfoDataPtr = DevInfoData.get_mut_ptr();
-  unsafe_defer! { cleanupDriverInfoList <- SetupDiDestroyDriverInfoList(DevInfo, DevInfoDataPtr, SPDIT_COMPATDRIVER); };
+  let dev_info_data_ptr = dev_info_data.get_mut_ptr();
+  unsafe_defer! { cleanup_driver_info_list <- SetupDiDestroyDriverInfoList(dev_info, dev_info_data_ptr, SPDIT_COMPATDRIVER); };
   let mut driver_date: FILETIME = unsafe { std::mem::zeroed() };
   let mut driver_version = 0;
   let mut dev_info_existing_adapters = INVALID_HANDLE_VALUE;
   let dev_info_existing_adapters_ptr = dev_info_existing_adapters.get_mut_ptr();
   let mut existing_adapters = std::collections::LinkedList::new();
   let existing_adapters_ptr = existing_adapters.get_mut_ptr();
-  unsafe_defer! { cleanupExistingAdapters <-
-    DriverInstallDeferredCleanup(*dev_info_existing_adapters_ptr, &mut *existing_adapters_ptr);
+  unsafe_defer! { cleanup_existing_adapters <-
+    driver_install_deferred_cleanup(*dev_info_existing_adapters_ptr, &mut *existing_adapters_ptr);
   };
-  for EnumIndex in 0.. {
-    let mut DrvInfoData = SP_DRVINFO_DATA_W {
+  for enum_index in 0.. {
+    let mut drv_info_data = SP_DRVINFO_DATA_W {
       cbSize: csizeof!(SP_DRVINFO_DATA_W),
       ..unsafe { std::mem::zeroed() }
     };
     let result = unsafe {
       SetupDiEnumDriverInfoW(
-        DevInfo,
-        DevInfoData.get_mut_ptr(),
+        dev_info,
+        dev_info_data.get_mut_ptr(),
         SPDIT_COMPATDRIVER,
-        EnumIndex,
-        DrvInfoData.get_mut_ptr(),
+        enum_index,
+        drv_info_data.get_mut_ptr(),
       )
     };
     if result == FALSE {
@@ -402,12 +402,12 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
       }
       continue;
     }
-    let drv_info_data_driver_date = DrvInfoData.DriverDate;
-    if IsNewer(
+    let drv_info_data_driver_date = drv_info_data.DriverDate;
+    if is_newer(
       &WINTUN_INF_FILETIME,
       WINTUN_INF_VERSION,
       &drv_info_data_driver_date,
-      DrvInfoData.DriverVersion,
+      drv_info_data.DriverVersion,
     ) {
       if !check_handle(dev_info_existing_adapters) {
         dev_info_existing_adapters = unsafe {
@@ -424,19 +424,19 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
         if !check_handle(dev_info_existing_adapters) {
           return Err(last_error!("Failed to get present adapters"));
         }
-        drop(DisableAllOurAdapters(DevInfo, &mut existing_adapters));
+        drop(disable_all_our_adapters(dev_info, &mut existing_adapters));
         log!(
           crate::logger::Level::Info,
           "Waiting for existing driver to unload from kernel"
         );
-        if !EnsureWintunUnloaded() {
+        if !ensure_wintun_unloaded() {
           warn!("Failed to unload existing driver, which means a reboot will likely be required");
         }
       }
       info!(
         "Removing existing driver {}.{}",
-        ((DrvInfoData.DriverVersion & 0xffff000000000000) >> 48),
-        ((DrvInfoData.DriverVersion & 0x0000ffff00000000) >> 32)
+        ((drv_info_data.DriverVersion & 0xffff000000000000) >> 48),
+        ((drv_info_data.DriverVersion & 0x0000ffff00000000) >> 32)
       );
       let mut large_buffer = [0u8; 0x2000];
       let mut size = std::mem::size_of_val(&large_buffer) as DWORD;
@@ -445,9 +445,9 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
       drv_info_detail_data.cbSize = std::mem::size_of::<SP_DRVINFO_DETAIL_DATA_W>() as DWORD;
       let result = unsafe {
         SetupDiGetDriverInfoDetailW(
-          DevInfo,
-          DevInfoData.get_mut_ptr(),
-          DrvInfoData.get_mut_ptr(),
+          dev_info,
+          dev_info_data.get_mut_ptr(),
+          drv_info_data.get_mut_ptr(),
           drv_into_detail_data_ptr,
           size,
           size.get_mut_ptr(),
@@ -470,19 +470,19 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
       }
       continue;
     }
-    let drv_info_data_driver_date = DrvInfoData.DriverDate;
-    if !IsNewer(
+    let drv_info_data_driver_date = drv_info_data.DriverDate;
+    if !is_newer(
       &drv_info_data_driver_date,
-      DrvInfoData.DriverVersion,
+      drv_info_data.DriverVersion,
       &driver_date,
       driver_version,
     ) {
       continue;
     }
-    driver_date = DrvInfoData.DriverDate;
-    driver_version = DrvInfoData.DriverVersion;
+    driver_date = drv_info_data.DriverDate;
+    driver_version = drv_info_data.DriverVersion;
   }
-  cleanupDriverInfoList.run();
+  cleanup_driver_info_list.run();
 
   if driver_version != 0 {
     info!(
@@ -490,7 +490,7 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
       ((driver_version & 0xffff000000000000) >> 48),
       ((driver_version & 0x0000ffff00000000) >> 32)
     );
-    cleanupExistingAdapters.forget();
+    cleanup_existing_adapters.forget();
     return Ok((dev_info_existing_adapters, existing_adapters));
   }
   info!(
@@ -499,7 +499,7 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
     ((WINTUN_INF_VERSION & 0x0000ffff00000000) >> 32)
   );
   let random_temp_sub_dir = create_temp_dir()?;
-  defer! { cleanupDirectory <-
+  defer! { cleanup_directory <-
     if let Err(err) = std::fs::remove_dir_all(&random_temp_sub_dir) {
       error!(
         err,
@@ -511,12 +511,12 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
   let sys_path = random_temp_sub_dir.join("wintun.sys");
   let inf_path = random_temp_sub_dir.join("wintun.inf");
   info!("Extracting driver");
-  defer! { cleanupDelete <-
+  defer! { cleanup_delete <-
     drop(std::fs::remove_file(&cat_path));
     drop(std::fs::remove_file(&sys_path));
     drop(std::fs::remove_file(&inf_path));
   };
-  let native_machine = unsafe { get_system_params().NativeMachine };
+  let native_machine = unsafe { get_system_params().native_machine };
   let (cat_res_id, sys_res_id, inf_res_id) = match native_machine {
     winapi::um::winnt::IMAGE_FILE_MACHINE_AMD64 => {
       (ResId::CatAmd64, ResId::SysAmd64, ResId::InfAmd64)
@@ -553,16 +553,16 @@ pub fn DriverInstall() -> std::io::Result<(HDEVINFO, SP_DEVINFO_DATA_LIST)> {
   if result == FALSE {
     last_error!("Could not install driver {} to store", inf_path.display());
   }
-  cleanupDelete.run();
-  cleanupDirectory.run();
-  cleanupExistingAdapters.forget();
-  cleanupDevInfo.run();
-  DriverInstallationLock.release();
+  cleanup_delete.run();
+  cleanup_directory.run();
+  cleanup_existing_adapters.forget();
+  cleanup_dev_info.run();
+  driver_installation_lock.release();
   Ok((dev_info_existing_adapters, existing_adapters))
 }
 
-pub fn WintunDeleteDriver() -> std::io::Result<()> {
-  AdapterCleanupOrphanedDevices();
+pub fn wintun_delete_driver() -> std::io::Result<()> {
+  adapter_cleanup_orphaned_devices();
   let driver_installation_lock = SystemNamedMutexLock::take_driver_installation_mutex()?;
   let dev_info = unsafe {
     SetupDiCreateDeviceInfoListExW(
@@ -575,7 +575,7 @@ pub fn WintunDeleteDriver() -> std::io::Result<()> {
   if !check_handle(dev_info) {
     return Err(last_error!("Failed to create empty device information set"));
   }
-  unsafe_defer! { cleanupDevInfo <- SetupDiDestroyDeviceInfoList(dev_info); };
+  unsafe_defer! { cleanup_dev_info <- SetupDiDestroyDeviceInfoList(dev_info); };
   let mut dev_info_data = SP_DEVINFO_DATA {
     cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as DWORD,
     ..unsafe { std::mem::zeroed() }
@@ -616,10 +616,10 @@ pub fn WintunDeleteDriver() -> std::io::Result<()> {
     return Err(last_error!("Failed building adapter driver info list"));
   }
   let dev_info_data_ptr = dev_info_data.get_mut_ptr();
-  unsafe_defer! { cleanupDriverInfoList <-
+  unsafe_defer! { cleanup_driver_info_list <-
     SetupDiDestroyDriverInfoList(dev_info, dev_info_data_ptr, SPDIT_COMPATDRIVER);
   };
-  for EnumIndex in 0.. {
+  for enum_index in 0.. {
     let mut drv_info_data = SP_DRVINFO_DATA_W {
       cbSize: std::mem::size_of::<SP_DRVINFO_DATA_W>() as DWORD,
       ..unsafe { std::mem::zeroed() }
@@ -629,7 +629,7 @@ pub fn WintunDeleteDriver() -> std::io::Result<()> {
         dev_info,
         dev_info_data_ptr,
         SPDIT_COMPATDRIVER,
-        EnumIndex,
+        enum_index,
         drv_info_data.get_mut_ptr(),
       )
     };
@@ -667,8 +667,8 @@ pub fn WintunDeleteDriver() -> std::io::Result<()> {
       last_error!("Unable to remove driver {}", inf_file_name.display());
     }
   }
-  cleanupDriverInfoList.run();
-  cleanupDevInfo.run();
+  cleanup_driver_info_list.run();
+  cleanup_dev_info.run();
   driver_installation_lock.release();
   Ok(())
 }
