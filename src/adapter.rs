@@ -1252,6 +1252,7 @@ fn queue_up_orphaned_device_cleanup_routine() {
 }
 
 pub fn adapter_cleanup_orphaned_devices() {
+  let system_params = unsafe { get_system_params() };
   let device_installation_mutex = match SystemNamedMutexLock::take_device_installation_mutex() {
     Ok(res) => res,
     Err(_) => {
@@ -1260,7 +1261,7 @@ pub fn adapter_cleanup_orphaned_devices() {
     }
   };
 
-  if unsafe { get_system_params().is_windows7 } {
+  if system_params.is_windows7 {
     cleanup_orphaned_devices_win7();
     return;
   }

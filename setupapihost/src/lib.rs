@@ -134,7 +134,6 @@ pub unsafe extern "system" fn RemoveInstance(_: HWND, _: HINSTANCE, _: LPCSTR, _
     )
     || FALSE == SetupDiCallClassInstaller(DIF_REMOVE, dev_info, &mut dev_info_data)
   {
-    error!("Failed to set remove device params");
     return;
   }
   cleanup_dev_info.run();
