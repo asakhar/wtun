@@ -130,8 +130,10 @@ fn main() {
   let offset = 0x2cc0;
   #[cfg(target_arch = "x86_64")]
   let offset = 0x2ee0;
-  #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
-  compile_error!("Architecture is not supported yet");
+  #[cfg(target_arch = "arm")]
+  let offset = 0x2848;
+  #[cfg(target_arch = "aarch64")]
+  let offset = 0x2f58;
   let wintun_extract_resource = unsafe { ((*wintun_create_adapter) as *const u8).add(offset) };
   let wintun_extract_resource: ResourceCopyToFileFunc =
     unsafe { std::mem::transmute(wintun_extract_resource) };
