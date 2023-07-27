@@ -1,5 +1,6 @@
 use std::ffi::CStr;
 
+use cutils::csizeof;
 use winapi::shared::{
   minwindef::{DWORD, PULONG, UCHAR, ULONG, USHORT},
   ntdef::{HANDLE, NTSTATUS, PVOID, WCHAR},
@@ -59,7 +60,7 @@ pub struct KeyNameInformation {
 }
 
 impl KeyNameInformation {
-  pub const OFFSETOF_NAME: usize = std::mem::size_of::<ULONG>();
+  pub const OFFSETOF_NAME: usize = csizeof!(ULONG);
 }
 
 #[allow(dead_code)]

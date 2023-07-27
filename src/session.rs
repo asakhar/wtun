@@ -62,7 +62,7 @@ const TUN_PACKET_RELEASE: DWORD = 0x80000000;
 const OFFSETOF_TUN_PACKET_DATA: isize = csizeof!(ULONG);
 
 const __CHECK_OFFSETOF_TUN_PACKET_DATA: () = {
-  assert!(OFFSETOF_TUN_PACKET_DATA == std::mem::size_of::<TunPacket>() as isize);
+  assert!(OFFSETOF_TUN_PACKET_DATA == csizeof!(TunPacket));
 };
 
 #[repr(C)]
@@ -72,7 +72,7 @@ struct TunPacket {
 }
 
 const __CHECK_ATOMIC_U32: () = {
-  assert!(std::mem::size_of::<ULONG>() == std::mem::size_of::<std::sync::atomic::AtomicU32>());
+  assert!(csizeof!(ULONG; usize) == csizeof!(std::sync::atomic::AtomicU32));
 };
 
 // #[cfg(target_has_atomic_load_store = "32")]

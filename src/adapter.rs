@@ -1109,7 +1109,7 @@ pub(crate) fn adapter_remove_instance(
   }
   let mut remove_device_params = SP_REMOVEDEVICE_PARAMS {
     ClassInstallHeader: SP_CLASSINSTALL_HEADER {
-      cbSize: std::mem::size_of::<SP_CLASSINSTALL_HEADER>() as u32,
+      cbSize: csizeof!(SP_CLASSINSTALL_HEADER),
       InstallFunction: DIF_REMOVE,
     },
     Scope: DI_REMOVEDEVICE_GLOBAL,
@@ -1120,7 +1120,7 @@ pub(crate) fn adapter_remove_instance(
       dev_info,
       dev_info_data,
       remove_device_params.ClassInstallHeader.get_mut_ptr(),
-      std::mem::size_of_val(&remove_device_params) as u32,
+      csizeof!(=remove_device_params),
     )
   };
   if result == FALSE {
@@ -1143,7 +1143,7 @@ pub(crate) fn adapter_enable_instance(
   }
   let mut params = SP_PROPCHANGE_PARAMS {
     ClassInstallHeader: SP_CLASSINSTALL_HEADER {
-      cbSize: std::mem::size_of::<SP_CLASSINSTALL_HEADER>() as u32,
+      cbSize: csizeof!(SP_CLASSINSTALL_HEADER),
       InstallFunction: DIF_PROPERTYCHANGE,
     },
     StateChange: DICS_ENABLE,
@@ -1155,7 +1155,7 @@ pub(crate) fn adapter_enable_instance(
       dev_info,
       dev_info_data,
       params.ClassInstallHeader.get_mut_ptr(),
-      std::mem::size_of_val(&params) as u32,
+      csizeof!(=params),
     )
   };
   if result == FALSE {
@@ -1178,7 +1178,7 @@ pub(crate) fn adapter_disable_instance(
   }
   let mut params = SP_PROPCHANGE_PARAMS {
     ClassInstallHeader: SP_CLASSINSTALL_HEADER {
-      cbSize: std::mem::size_of::<SP_CLASSINSTALL_HEADER>() as u32,
+      cbSize: csizeof!(SP_CLASSINSTALL_HEADER),
       InstallFunction: DIF_PROPERTYCHANGE,
     },
     StateChange: DICS_DISABLE,
@@ -1190,7 +1190,7 @@ pub(crate) fn adapter_disable_instance(
       dev_info,
       dev_info_data,
       params.ClassInstallHeader.get_mut_ptr(),
-      std::mem::size_of_val(&params) as u32,
+      csizeof!(=params),
     )
   };
   if result == FALSE {
@@ -1365,7 +1365,7 @@ fn rename_by_net_guid(guid: GUID, name: &WideCStr) -> std::io::Result<()> {
     SetupDiDestroyDeviceInfoList(dev_info) ;
   };
   let mut dev_info_data = SP_DEVINFO_DATA {
-    cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as DWORD,
+    cbSize: csizeof!(SP_DEVINFO_DATA),
     ..unsafe { std::mem::zeroed() }
   };
   for enum_index in 0.. {

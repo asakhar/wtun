@@ -208,7 +208,7 @@ pub fn registry_query_dword(
   log: bool,
 ) -> std::io::Result<DWORD> {
   let mut value_type = REG_DWORD;
-  let mut size = std::mem::size_of::<DWORD>();
+  let mut size = csizeof!(DWORD; usize);
   let mut value: DWORD = 0;
   let name = name.as_ref();
   let name_ptr = name.as_ptr();

@@ -65,7 +65,7 @@ fn disable_all_our_adapters(
   let mut overall_result = Ok(());
   for enum_index in 0.. {
     let mut device = SP_DEVINFO_DATA {
-      cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as DWORD,
+      cbSize: csizeof!(SP_DEVINFO_DATA),
       ..unsafe { core::mem::zeroed() }
     };
     let result = unsafe { SetupDiEnumDeviceInfo(dev_info, enum_index, device.get_mut_ptr()) };
@@ -197,7 +197,7 @@ fn version_of_file(filename: &WideCStr) -> std::io::Result<DWORD> {
 
   let mut version_info = vec![0u8; len as usize];
   let mut fixed_info = std::ptr::null_mut();
-  let mut fixed_info_len = std::mem::size_of::<VS_FIXEDFILEINFO>() as UINT;
+  let mut fixed_info_len = csizeof!(VS_FIXEDFILEINFO; UINT);
   if unsafe { GetFileVersionInfoW(filename.as_ptr(), 0, len, version_info.as_mut_ptr().cast()) }
     == FALSE
   {
@@ -334,7 +334,7 @@ pub fn driver_install() -> std::io::Result<(HDEVINFO, SpDevinfoDataList)> {
   unsafe_defer! { cleanup_dev_info <- SetupDiDestroyDeviceInfoList(dev_info); };
 
   let mut dev_info_data = SP_DEVINFO_DATA {
-    cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as DWORD,
+    cbSize: csizeof!(SP_DEVINFO_DATA),
     ..unsafe { std::mem::zeroed() }
   };
   let result = unsafe {
@@ -439,10 +439,10 @@ pub fn driver_install() -> std::io::Result<(HDEVINFO, SpDevinfoDataList)> {
         ((drv_info_data.DriverVersion & 0x0000ffff00000000) >> 32)
       );
       let mut large_buffer = [0u8; 0x2000];
-      let mut size = std::mem::size_of_val(&large_buffer) as DWORD;
+      let mut size = csizeof!(=large_buffer);
       let drv_into_detail_data_ptr = large_buffer.as_mut_ptr() as *mut SP_DRVINFO_DETAIL_DATA_W;
       let drv_info_detail_data = unsafe { &mut *drv_into_detail_data_ptr };
-      drv_info_detail_data.cbSize = std::mem::size_of::<SP_DRVINFO_DETAIL_DATA_W>() as DWORD;
+      drv_info_detail_data.cbSize = csizeof!(SP_DRVINFO_DETAIL_DATA_W);
       let result = unsafe {
         SetupDiGetDriverInfoDetailW(
           dev_info,
@@ -577,7 +577,7 @@ pub fn wintun_delete_driver() -> std::io::Result<()> {
   }
   unsafe_defer! { cleanup_dev_info <- SetupDiDestroyDeviceInfoList(dev_info); };
   let mut dev_info_data = SP_DEVINFO_DATA {
-    cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as DWORD,
+    cbSize: csizeof!(SP_DEVINFO_DATA),
     ..unsafe { std::mem::zeroed() }
   };
   let result = unsafe {
@@ -603,7 +603,7 @@ pub fn wintun_delete_driver() -> std::io::Result<()> {
       dev_info_data.get_mut_ptr(),
       SPDRP_HARDWAREID,
       hwids.as_ptr() as *const BYTE,
-      std::mem::size_of_val(&hwids) as DWORD,
+      csizeof!(=hwids),
     )
   };
   if result == FALSE {
@@ -621,7 +621,7 @@ pub fn wintun_delete_driver() -> std::io::Result<()> {
   };
   for enum_index in 0.. {
     let mut drv_info_data = SP_DRVINFO_DATA_W {
-      cbSize: std::mem::size_of::<SP_DRVINFO_DATA_W>() as DWORD,
+      cbSize: csizeof!(SP_DRVINFO_DATA_W),
       ..unsafe { std::mem::zeroed() }
     };
     let result = unsafe {

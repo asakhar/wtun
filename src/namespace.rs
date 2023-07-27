@@ -1,6 +1,6 @@
 use std::cell::UnsafeCell;
 
-use cutils::{inspection::GetPtrExt, strings::WideCStr, unsafe_defer, widecstr, errors::get_last_error_code};
+use cutils::{inspection::GetPtrExt, strings::WideCStr, unsafe_defer, widecstr, errors::get_last_error_code, csizeof};
 use winapi::{
   shared::{
     minwindef::{BYTE, DWORD, FALSE},
@@ -96,7 +96,7 @@ impl SystemCriticalSection {
   const fn new() -> Self {
     // const impl of:
     //  let section: CRITICAL_SECTION = unsafe { std::mem::zeroed() };
-    let section_bytes = [0u8; std::mem::size_of::<CRITICAL_SECTION>()];
+    let section_bytes = [0u8; csizeof!(CRITICAL_SECTION)];
     let section: CRITICAL_SECTION = unsafe { std::mem::transmute(section_bytes) };
     let section = UnsafeCell::new(section);
     SystemCriticalSection(section)
@@ -144,7 +144,7 @@ fn namespace_runtime_init() -> std::io::Result<()> {
   }
 
   let mut sid = [0 as BYTE; MAX_SID_SIZE];
-  let mut sid_size = std::mem::size_of_val(&sid) as DWORD;
+  let mut sid_size = csizeof!(=sid; DWORD);
   let system_params = unsafe { get_system_params() };
   let result = unsafe {
     CreateWellKnownSid(
